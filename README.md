@@ -6,6 +6,8 @@ When a handler has several response branches, the possible statuses can be easy 
 
 ![HTTP Status Lens showing the possible response statuses above an Express route](https://raw.githubusercontent.com/katniis/vscode-http-status-lens/main/images/http-status-lens-demo.png)
 
+[Download the latest VSIX from GitHub Releases](https://github.com/katniis/vscode-http-status-lens/releases/latest).
+
 ## Features
 
 - A read-only CodeLens above supported routes, for example `GET /users/:id → 200 OK | 404 Not Found`.
@@ -61,6 +63,10 @@ Explicit numeric status calls in supported JavaScript and TypeScript files are c
 - JSX/TSX, Vue, Svelte, generated files, and non-file documents are not supported.
 - Nested callback responses, class/object method handlers, low-level Node APIs such as `res.statusCode` and `res.writeHead`, exceptions, and `next(error)` do not contribute statuses.
 - Complex control flow can hide an implicit result; uncertain defaults are omitted rather than guessed.
+
+## Roadmap
+
+Support for additional web frameworks and languages beyond Express and JavaScript/TypeScript is a future direction. Express is the only supported framework today; broader support has no release timeline yet.
 
 ## Privacy
 
