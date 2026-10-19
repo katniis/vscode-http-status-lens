@@ -2,6 +2,10 @@
 
 HTTP Status Lens shows possible HTTP response statuses beside Express routes while you read or edit JavaScript and TypeScript. It uses static analysis; it does not run the application or make HTTP requests, so results are source-level possibilities rather than runtime guarantees.
 
+When a handler has several response branches, the possible statuses can be easy to miss. HTTP Status Lens brings those results up to the route declaration, without running your app.
+
+![HTTP Status Lens showing the possible response statuses above an Express route](images/http-status-lens-demo.png)
+
 ## Features
 
 - A read-only CodeLens above supported routes, for example `GET /users/:id → 200 OK | 404 Not Found`.
@@ -13,9 +17,29 @@ The CodeLens lists possible statuses in numeric order. It marks inferred default
 
 VS Code renders a CodeLens title as plain text, so its method, route, and status segments cannot be colored independently.
 
-## Install from a VSIX
+## Quick start
 
-Build the package with `npm run package`, then in VS Code open the Extensions view, select **… → Install from VSIX…**, and choose `http-status-lens-0.1.0.vsix`.
+From a checkout of this repository, build and install the VSIX:
+
+```sh
+npm install
+npm run package -- --no-rewrite-relative-links
+code --install-extension ./http-status-lens-0.1.0.vsix
+```
+
+Open a supported Express `.js` or `.ts` file. A CodeLens above each recognized route lists the possible response statuses. For example, `GET /users/:id → 200 OK | 404 Not Found` means the handler contains paths that return either status; it does not predict which one will run.
+
+To hide the route CodeLens, set `httpStatusLens.showCodeLens` to `false` in VS Code Settings or your `settings.json`:
+
+```json
+{
+  "httpStatusLens.showCodeLens": false
+}
+```
+
+## Install through the VS Code UI
+
+After building the VSIX, open the Extensions view, select **… → Install from VSIX…**, and choose `http-status-lens-0.1.0.vsix`.
 
 ## Supported code
 
@@ -49,3 +73,11 @@ npm run package
 ```
 
 The unit tests exercise the analyzer and formatting logic; the smoke test launches an isolated VS Code 1.142 extension host.
+
+## Contributing
+
+Bug reports and focused pull requests are welcome. Run `npm run check`, `npm run lint`, and `npm test` before submitting a change.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

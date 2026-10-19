@@ -4,3 +4,5 @@ dist/*.map
 !package.json
 !README.md
 !LICENSE
+!images
+!images/**
