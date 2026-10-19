@@ -1,0 +1,77 @@
+import * as vscode from "vscode";
+import { analyzeDocument } from "./analyzer.js";
+import type { AnalysisResult } from "./model.js";
+import { formatRouteTitle, formatStatusHover } from "./presentation.js";
+
+export class DocumentAnalysisCache {
+  private readonly entries = new Map<string, { version: number; result: AnalysisResult }>();
+
+  get(document: vscode.TextDocument): AnalysisResult {
+    const key = document.uri.toString();
+    const cached = this.entries.get(key);
+    if (cached?.version === document.version) return cached.result;
+    const result = analyzeDocument(document.getText(), document.fileName);
+    this.entries.set(key, { version: document.version, result });
+    return result;
+  }
+
+  delete(uri: vscode.Uri): void {
+    this.entries.delete(uri.toString());
+  }
+}
+
+function supported(document: vscode.TextDocument): boolean {
+  return document.uri.scheme === "file" && ["javascript", "typescript"].includes(document.languageId);
+}
+
+type RefreshableCodeLensProvider = vscode.CodeLensProvider & {
+  readonly onDidChangeCodeLenses: vscode.Event<void>;
+  refresh(): void;
+};
+
+export function createCodeLensProvider(cache: DocumentAnalysisCache, onError: (error: unknown) => void): RefreshableCodeLensProvider {
+  const emitter = new vscode.EventEmitter<void>();
+  return {
+    onDidChangeCodeLenses: emitter.event,
+    refresh: () => emitter.fire(),
+    provideCodeLenses(document, token) {
+      if (token.isCancellationRequested || !supported(document)) return [];
+      try {
+        return cache.get(document).routes.map((route) => {
+          const position = document.positionAt(route.range.start);
+          const line = new vscode.Range(position.line, 0, position.line, 0);
+          return new vscode.CodeLens(line, { title: formatRouteTitle(route), command: "" });
+        });
+      } catch (error) {
+        onError(error);
+        return [];
+      }
+    },
+  };
+}
+
+export function createHoverProvider(cache: DocumentAnalysisCache, onError: (error: unknown) => void): vscode.HoverProvider {
+  return {
+    provideHover(document, position, token) {
+      if (token.isCancellationRequested || !supported(document)) return undefined;
+      try {
+        const offset = document.offsetAt(position);
+        for (const route of cache.get(document).routes) {
+          for (const status of route.statuses) {
+            if (status.kind !== "explicit") continue;
+            for (const range of status.ranges ?? [status.range]) {
+              if (offset >= range.start && offset < range.end) {
+                const hoverRange = new vscode.Range(document.positionAt(range.start), document.positionAt(range.end));
+                return new vscode.Hover(formatStatusHover(status.code), hoverRange);
+              }
+            }
+          }
+        }
+        return undefined;
+      } catch (error) {
+        onError(error);
+        return undefined;
+      }
+    },
+  };
+}
