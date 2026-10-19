@@ -23,7 +23,7 @@ export function getCompletionCandidates(kind: "status" | "sendStatus", query: st
     .map((status) => ({
       code: status.code,
       label: `${status.code} ${status.phrase}`,
-      detail: `${status.phrase} · ${status.category}`,
+      detail: `${status.phrase} (${status.category})`,
       insertText: `res.${kind === "status" ? "status" : "sendStatus"}(${status.code})`,
     }));
 }

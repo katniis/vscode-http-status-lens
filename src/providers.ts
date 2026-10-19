@@ -3,6 +3,7 @@ import { analyzeDocument } from "./analyzer.js";
 import { getCompletionCandidates, matchCompletionPrefix } from "./completions.js";
 import type { AnalysisResult } from "./model.js";
 import { formatRouteTitle, formatStatusHover } from "./presentation.js";
+import { getStatus } from "./statuses.js";
 
 export class DocumentAnalysisCache {
   private readonly entries = new Map<string, { version: number; result: AnalysisResult }>();
@@ -38,7 +39,7 @@ export function createCodeLensProvider(cache: DocumentAnalysisCache, onError: (e
     refresh: () => emitter.fire(),
     dispose: () => emitter.dispose(),
     provideCodeLenses(document, token) {
-      if (token.isCancellationRequested || !supported(document)) return [];
+      if (token.isCancellationRequested || !supported(document) || !vscode.workspace.getConfiguration("httpStatusLens").get<boolean>("showCodeLens", true)) return [];
       try {
         return cache.get(document).routes.map((route) => {
           const position = document.positionAt(route.range.start);
@@ -77,6 +78,50 @@ export function createHoverProvider(cache: DocumentAnalysisCache, onError: (erro
       }
     },
   };
+}
+
+export function createRouteDecorations(cache: DocumentAnalysisCache, onError: (error: unknown) => void): vscode.Disposable {
+  const statusColors = new Map([
+    ["Informational", "#C586C0"], ["Success", "#4EC9B0"], ["Redirection", "#4FC1FF"],
+    ["Client error", "#CE9178"], ["Server error", "#F14C4C"],
+  ].map(([category, color]) => [category, vscode.window.createTextEditorDecorationType({ color })]));
+  const decorations = [...statusColors.values()];
+
+  function apply(editor: vscode.TextEditor): void {
+    for (const decoration of decorations) editor.setDecorations(decoration, []);
+    if (!supported(editor.document)) return;
+    try {
+      const ranges = new Map(decorations.map((decoration) => [decoration, [] as vscode.Range[]]));
+      const routes = cache.get(editor.document).routes;
+      for (const route of routes) {
+        for (const status of route.statuses) {
+          if (status.kind !== "explicit") continue;
+          const statusDecoration = statusColors.get(getStatus(status.code)?.category ?? "");
+          if (!statusDecoration) continue;
+          for (const range of status.ranges ?? [status.range]) {
+            ranges.get(statusDecoration)?.push(new vscode.Range(editor.document.positionAt(range.start), editor.document.positionAt(range.end)));
+          }
+        }
+      }
+      for (const decoration of decorations) editor.setDecorations(decoration, ranges.get(decoration) ?? []);
+    } catch (error) {
+      onError(error);
+    }
+  }
+
+  const updateVisible = (): void => { for (const editor of vscode.window.visibleTextEditors) apply(editor); };
+  const subscriptions = [
+    vscode.window.onDidChangeActiveTextEditor(updateVisible),
+    vscode.window.onDidChangeVisibleTextEditors(updateVisible),
+    vscode.workspace.onDidChangeTextDocument(({ document }) => {
+      for (const editor of vscode.window.visibleTextEditors) if (editor.document === document) apply(editor);
+    }),
+  ];
+  updateVisible();
+  return new vscode.Disposable(() => {
+    for (const subscription of subscriptions) subscription.dispose();
+    for (const decoration of decorations) decoration.dispose();
+  });
 }
 
 export function createCompletionProvider(onError: (error: unknown) => void): vscode.CompletionItemProvider {

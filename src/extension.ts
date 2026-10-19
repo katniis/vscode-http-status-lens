@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { DocumentAnalysisCache, createCodeLensProvider, createCompletionProvider, createHoverProvider } from "./providers.js";
+import { DocumentAnalysisCache, createCodeLensProvider, createCompletionProvider, createHoverProvider, createRouteDecorations } from "./providers.js";
 
 export function activate(context: vscode.ExtensionContext): void {
   const cache = new DocumentAnalysisCache();
@@ -15,10 +15,14 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     output,
     codeLenses,
+    createRouteDecorations(cache, onError),
     vscode.languages.registerCodeLensProvider(selector, codeLenses),
     vscode.languages.registerHoverProvider(selector, createHoverProvider(cache, onError)),
     vscode.languages.registerCompletionItemProvider(selector, createCompletionProvider(onError)),
     vscode.workspace.onDidCloseTextDocument((document) => cache.delete(document.uri)),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("httpStatusLens.showCodeLens")) codeLenses.refresh();
+    }),
   );
 
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;

@@ -4,11 +4,14 @@ HTTP Status Lens shows possible HTTP response statuses beside Express routes whi
 
 ## Features
 
-- A read-only CodeLens above supported routes, for example `GET /users/:id · 200 OK · 404 Not Found`.
+- A read-only CodeLens above supported routes, for example `GET /users/:id → 200 OK | 404 Not Found`.
+- Color-coded explicit response status code literals in source.
 - Hover explanations on numeric literals passed to recognized `res.status(...)` and `res.sendStatus(...)` calls.
 - IntelliSense shortcuts: type `rs404` for `res.status(404)` or `rss404` for `res.sendStatus(404)`, then accept with Tab or Enter. Shortcuts only offer recognized status codes and never expand automatically.
 
 The CodeLens lists possible statuses in numeric order. It marks inferred defaults as `(implicit)`, uses `dynamic status` when an expression cannot be resolved, and shows `No direct status detected` when no result can be proven.
+
+VS Code renders a CodeLens title as plain text, so its method, route, and status segments cannot be colored independently.
 
 ## Install from a VSIX
 

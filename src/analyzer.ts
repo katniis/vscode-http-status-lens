@@ -73,11 +73,13 @@ function routeCall(node: ts.CallExpression, receivers: ReadonlySet<string>): { m
   const method = name.text.toLowerCase();
   if (!routeMethods.has(method)) return undefined;
 
-  if (ts.isIdentifier(expression) && receivers.has(expression.text)) {
-    return { method: method.toUpperCase(), path: pathText(node.arguments[0]) };
-  }
-  const path = routePath(expression, receivers);
-  return path ? { method: method.toUpperCase(), path: pathText(path) } : undefined;
+  const directRoute = ts.isIdentifier(expression) && receivers.has(expression.text);
+  const path = directRoute ? node.arguments[0] : routePath(expression, receivers);
+  if (!path && !directRoute) return undefined;
+  return {
+    method: method.toUpperCase(),
+    path: pathText(path),
+  };
 }
 
 type Handler = ts.FunctionLikeDeclaration & { body: ts.ConciseBody };

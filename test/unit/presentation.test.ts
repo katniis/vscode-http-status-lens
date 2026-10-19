@@ -21,26 +21,26 @@ describe("presentation", () => {
     assert.equal(presentation().formatRouteTitle(route([
       { kind: "explicit", code: 404, range: { start: 4, end: 7 } },
       { kind: "explicit", code: 200, range: { start: 1, end: 4 } },
-    ])), "GET /users · 200 OK · 404 Not Found");
+    ])), "GET /users → 200 OK | 404 Not Found");
   });
 
   it("marksImplicitStatus", () => {
-    assert.equal(presentation().formatRouteTitle(route([{ kind: "implicit", code: 200 }])), "GET /users · 200 OK (implicit)");
+    assert.equal(presentation().formatRouteTitle(route([{ kind: "implicit", code: 200 }])), "GET /users → 200 OK (implicit)");
   });
 
   it("formatsNoDirectStatus", () => {
-    assert.equal(presentation().formatRouteTitle(route([])), "GET /users · No direct status detected");
+    assert.equal(presentation().formatRouteTitle(route([])), "GET /users → No direct status detected");
   });
 
   it("formatsDynamicPathAndStatus", () => {
-    assert.equal(presentation().formatRouteTitle(route([{ kind: "dynamic" }], "<dynamic path>")), "GET <dynamic path> · dynamic status");
+    assert.equal(presentation().formatRouteTitle(route([{ kind: "dynamic" }], "<dynamic path>")), "GET <dynamic path> → dynamic status");
   });
 
   it("formatsKnownHover", () => {
-    assert.equal(presentation().formatStatusHover(404), "404 Not Found\nClient error · The server cannot find the requested resource.");
+    assert.equal(presentation().formatStatusHover(404), "404 Not Found\n\nClient error\n\nThe server cannot find the requested resource.");
   });
 
   it("formatsUnknownHover", () => {
-    assert.equal(presentation().formatStatusHover(999), "999 Unknown status\nStatus code not recognized by Node.js.");
+    assert.equal(presentation().formatStatusHover(999), "999 Unknown status\n\nStatus code not recognized by Node.js.");
   });
 });

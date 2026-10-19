@@ -20,12 +20,12 @@ export function formatRouteTitle(route: RouteAnalysis): string {
     if (fact.kind === "dynamic") return "dynamic status";
     return `${label(fact.code)}${fact.kind === "implicit" ? " (implicit)" : ""}`;
   });
-  return `${route.method} ${route.path} · ${statuses.length ? statuses.join(" · ") : "No direct status detected"}`;
+  return `${route.method} ${route.path} → ${statuses.length ? statuses.join(" | ") : "No direct status detected"}`;
 }
 
 export function formatStatusHover(code: number): string {
   const status = getStatus(code);
   return status
-    ? `${status.code} ${status.phrase}\n${status.category} · ${status.description}`
-    : `${code} Unknown status\nStatus code not recognized by Node.js.`;
+    ? `${status.code} ${status.phrase}\n\n${status.category}\n\n${status.description}`
+    : `${code} Unknown status\n\nStatus code not recognized by Node.js.`;
 }

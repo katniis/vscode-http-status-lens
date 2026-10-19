@@ -21,6 +21,18 @@
       "supported": true
     }
   },
+  "contributes": {
+    "configuration": {
+      "title": "HTTP Status Lens",
+      "properties": {
+        "httpStatusLens.showCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show possible response statuses above Express routes."
+        }
+      }
+    }
+  },
   "scripts": {
     "check": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "lint": "eslint src test esbuild.mjs .vscode-test.mjs",

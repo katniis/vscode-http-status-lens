@@ -51,6 +51,10 @@ describe("completions", () => {
     assert.equal(getCompletionCandidates("sendStatus", "404")[0]?.insertText, "res.sendStatus(404)");
   });
 
+  it("formatsCandidateDetailsWithoutCenterDots", () => {
+    assert.equal(completions().getCompletionCandidates("status", "404")[0]?.detail, "Not Found (Client error)");
+  });
+
   it("rejectsPrefixEmbeddedInIdentifier", () => {
     const { matchCompletionPrefix } = completions();
     assert.equal(matchCompletionPrefix("const myrs404"), undefined);
