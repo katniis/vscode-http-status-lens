@@ -1,0 +1,48 @@
+{
+  "name": "http-status-lens",
+  "displayName": "HTTP Status Lens",
+  "description": "See possible Express response statuses in your code.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.142.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:typescript"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "scripts": {
+    "check": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "lint": "eslint src test esbuild.mjs",
+    "build": "node esbuild.mjs",
+    "compile-tests": "tsc -p tsconfig.test.json",
+    "test:unit": "npm run compile-tests && mocha \"out/test/unit/**/*.test.js\"",
+    "test:smoke": "vscode-test --label smoke",
+    "test": "npm run test:unit && npm run test:smoke",
+    "package": "npm run build && vsce package"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.8.1",
+    "@types/vscode": "^1.140.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.2",
+    "esbuild": "^0.25.11",
+    "eslint": "^9.38.0",
+    "mocha": "^11.7.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.1"
+  }
+}
