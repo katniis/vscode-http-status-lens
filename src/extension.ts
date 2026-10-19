@@ -28,6 +28,7 @@ export function activate(context: vscode.ExtensionContext): void {
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(({ document }) => {
     if (document.uri.scheme !== "file" || !["javascript", "typescript"].includes(document.languageId)) return;
+    cache.invalidate(document.uri);
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => codeLenses.refresh(), 75);
   }));

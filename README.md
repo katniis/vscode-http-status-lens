@@ -49,19 +49,22 @@ If the screenshot is missing from Extension Details after updating the README, r
 
 The extension activates for file-backed `.js`, `.cjs`, `.mjs`, `.ts`, `.cts`, and `.mts` documents. It analyzes Express applications and routers created directly with `express()`, `express.Router()`, or an imported `Router()`. It recognizes `get`, `post`, `put`, `patch`, `delete`, `options`, `head`, and `all`, including `router.route(path)` chains.
 
-Inline handlers, same-file function declarations, and same-file variables initialized directly with arrow or function expressions are analyzed. The second handler parameter is treated as the response object, regardless of its name. Recognized explicit status calls are `res.status(code)` and `res.sendStatus(code)`. Recognized response helpers are `send`, `json`, `jsonp`, `end`, `render`, `sendFile`, `download`, and `redirect`.
+Inline handlers, same-file function declarations and variables initialized directly with arrow or function expressions, plus directly imported relative ES module handlers are analyzed. Imported named handlers (including aliases) and default exports are supported across JavaScript and TypeScript files. The second handler parameter is treated as the response object, regardless of its name. Recognized explicit status calls are `res.status(code)` and `res.sendStatus(code)`. Recognized response helpers are `send`, `json`, `jsonp`, `end`, `render`, `sendFile`, `download`, and `redirect`.
+
+Explicit numeric status calls in supported JavaScript and TypeScript files are color-coded even when the file contains only controller handlers and no route declaration. Editing an imported handler refreshes the route summary in its importing file.
 
 ## Limits
 
-- This is conservative, single-document analysis. Results do not prove which branch will run or what the application will return at runtime.
-- Only Express is supported. Imported handlers and middleware, `app.use()`/`router.use()`, mounted router prefixes, aliases/reassigned app or router variables, named status constants, and arbitrary dynamic expressions are not resolved.
+- This is conservative static analysis. Results do not prove which branch will run or what the application will return at runtime.
+- Only direct relative ES module imports of handler functions are resolved. Package imports, path aliases, barrel re-exports, CommonJS-imported callbacks, and handler factories are not followed. Route summaries do not follow status-setting calls made inside helper functions invoked by a handler.
+- `app.use()`/`router.use()`, mounted router prefixes, aliases/reassigned app or router variables, named status constants, and arbitrary dynamic expressions are not resolved.
 - JSX/TSX, Vue, Svelte, generated files, and non-file documents are not supported.
-- Nested callback responses, class/object method handlers, handler factories, low-level Node APIs such as `res.statusCode` and `res.writeHead`, exceptions, and `next(error)` do not contribute statuses.
+- Nested callback responses, class/object method handlers, low-level Node APIs such as `res.statusCode` and `res.writeHead`, exceptions, and `next(error)` do not contribute statuses.
 - Complex control flow can hide an implicit result; uncertain defaults are omitted rather than guessed.
 
 ## Privacy
 
-Analysis runs locally on the current document. The extension does not index the workspace, execute source code or requests, make network calls, send telemetry, or write to workspace files. It works in untrusted workspaces.
+Analysis runs locally on the current document and directly imported handler files needed to resolve route summaries. The extension does not index the workspace, execute source code or requests, make network calls, send telemetry, or write to workspace files. It works in untrusted workspaces.
 
 ## Development
 

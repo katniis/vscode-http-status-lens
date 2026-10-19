@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it } from "mocha";
 
 type RouteAnalysis = { method: string; path: string; range: { start: number; end: number }; statuses: readonly { kind: string; code?: number; range?: { start: number; end: number } }[] };
-type Analyzer = { analyzeDocument(text: string, fileName: string): { routes: readonly RouteAnalysis[] } };
+type StatusLiteral = { code: number; range: { start: number; end: number } };
+type ImportedSource = { fileName: string; text: string };
+type Analyzer = { analyzeDocument(text: string, fileName: string, resolveImport?: (specifier: string, containingFile: string) => ImportedSource | undefined): { routes: readonly RouteAnalysis[]; statusLiterals: readonly StatusLiteral[] } };
 
 function analyzer(): Analyzer {
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- Keep missing analyzer as the deliberate RED failure.
@@ -12,7 +16,26 @@ function analyzer(): Analyzer {
 const routes = (text: string, fileName = "routes.ts"): readonly RouteAnalysis[] =>
   analyzer().analyzeDocument(text, fileName).routes;
 
+const separatedFixture = path.resolve(__dirname, "../../../test/fixtures/workspace/separated");
+
+function analyzeSeparatedRoutes() {
+  const routeFile = path.join(separatedFixture, "routes.js");
+  const controllerFile = path.join(separatedFixture, "controller.js");
+  const routeText = readFileSync(routeFile, "utf8");
+  const controllerText = readFileSync(controllerFile, "utf8");
+  return analyzer().analyzeDocument(routeText, routeFile, (specifier) =>
+    specifier === "./controller.js" ? { fileName: controllerFile, text: controllerText } : undefined);
+}
+
 describe("route discovery", () => {
+  it("resolvesDirectlyImportedNamedAliasesAndDefaultHandlers", () => {
+    const result = analyzeSeparatedRoutes();
+    assert.deepEqual(result.routes.map(({ path, statuses }) => [
+      path,
+      statuses.filter((status) => status.kind === "explicit").map((status) => status.code),
+    ]), [["/mine", [200, 401]], ["/missing", [404]]]);
+  });
+
   it("findsEsmAndCommonJsExpressReceivers", () => {
     const source = `import express from "express";
 import { Router } from "express";
@@ -100,12 +123,24 @@ app.get("/supported", (req, res) => {});`;
   });
 });
 
+describe("file-local status literals", () => {
+  it("findsExplicitStatusesInControllerFilesWithoutRoutes", () => {
+    const controllerFile = path.join(separatedFixture, "controller.js");
+    const source = readFileSync(controllerFile, "utf8");
+    const result = analyzer().analyzeDocument(source, controllerFile);
+    assert.deepEqual(result.statusLiterals.map(({ code, range }) => [code, source.slice(range.start, range.end)]), [
+      [401, "401"], [200, "200"], [404, "404"],
+    ]);
+  });
+});
+
 describe("status extraction explicit", () => {
   it("findsStatusAndSendStatus", () => {
     const source = `import express from "express"; const app = express(); app.get("/", (req, res) => { res.status(200); res.sendStatus(404); });`;
-    const statuses = routes(source)[0]?.statuses;
+    const result = analyzer().analyzeDocument(source, "routes.ts");
+    const statuses = result.routes[0]?.statuses;
     assert.deepEqual(statuses?.map((status) => [status.kind, status.code]), [["explicit", 200], ["explicit", 404]]);
-    for (const status of statuses ?? []) if (status.range) assert.equal(source.slice(status.range.start, status.range.end), String(status.code));
+    assert.deepEqual(result.statusLiterals.map(({ code, range }) => [code, source.slice(range.start, range.end)]), [[200, "200"], [404, "404"]]);
   });
 
   it("findsFluentStatusChains", () => {

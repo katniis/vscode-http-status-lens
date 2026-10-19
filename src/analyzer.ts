@@ -1,5 +1,5 @@
 import ts from "typescript";
-import type { AnalysisResult, RouteAnalysis, SourceRange, StatusFact } from "./model.js";
+import type { AnalysisResult, ImportedSource, ModuleResolver, RouteAnalysis, StatusFact, StatusLiteral } from "./model.js";
 
 const routeMethods = new Set(["get", "post", "put", "patch", "delete", "options", "head", "all"]);
 
@@ -84,6 +84,11 @@ function routeCall(node: ts.CallExpression, receivers: ReadonlySet<string>): { m
 
 type Handler = ts.FunctionLikeDeclaration & { body: ts.ConciseBody };
 
+interface ImportedHandlerBinding {
+  readonly moduleSpecifier: string;
+  readonly exportedName: string;
+}
+
 function functionBody(node: ts.Node | undefined): Handler | undefined {
   if (!node) return undefined;
   if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && node.body) return node as Handler;
@@ -115,7 +120,47 @@ function handlerMap(source: ts.SourceFile): Map<string, Handler> {
   return handlers;
 }
 
-function handlerFunctions(node: ts.CallExpression, receivers: ReadonlySet<string>, source: ts.SourceFile, known: ReadonlyMap<string, Handler>): Handler[] {
+function importedHandlerBindings(source: ts.SourceFile): Map<string, ImportedHandlerBinding> {
+  const handlers = new Map<string, ImportedHandlerBinding>();
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || !statement.importClause) continue;
+    const moduleSpecifier = statement.moduleSpecifier.text;
+    const clause = statement.importClause;
+    if (clause.name) handlers.set(clause.name.text, { moduleSpecifier, exportedName: "default" });
+    if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+      for (const item of clause.namedBindings.elements) {
+        handlers.set(item.name.text, { moduleSpecifier, exportedName: item.propertyName?.text ?? item.name.text });
+      }
+    }
+  }
+  return handlers;
+}
+
+function exportedHandlerMap(source: ts.SourceFile): Map<string, Handler> {
+  const handlers = new Map<string, Handler>();
+  for (const statement of source.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.body && statement.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword)) {
+      const handler = functionBody(statement);
+      if (handler) {
+        const isDefault = statement.modifiers.some(({ kind }) => kind === ts.SyntaxKind.DefaultKeyword);
+        if (isDefault) handlers.set("default", handler);
+        else if (statement.name) handlers.set(statement.name.text, handler);
+      }
+    } else if (ts.isVariableStatement(statement) && statement.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name)) continue;
+        const handler = functionBody(declaration.initializer);
+        if (handler) handlers.set(declaration.name.text, handler);
+      }
+    } else if (ts.isExportAssignment(statement)) {
+      const handler = functionBody(statement.expression);
+      if (handler) handlers.set("default", handler);
+    }
+  }
+  return handlers;
+}
+
+function handlerFunctions(node: ts.CallExpression, receivers: ReadonlySet<string>, source: ts.SourceFile, known: ReadonlyMap<string, Handler>, imported: (name: string) => Handler | undefined): Handler[] {
   if (!ts.isPropertyAccessExpression(node.expression)) return [];
   const receiver = node.expression.expression;
   const directRoute = ts.isIdentifier(receiver) && receivers.has(receiver.text);
@@ -125,11 +170,31 @@ function handlerFunctions(node: ts.CallExpression, receivers: ReadonlySet<string
     const inline = functionBody(argument);
     if (inline) result.push(inline);
     else if (ts.isIdentifier(argument)) {
-      const resolved = known.get(argument.text);
+      const resolved = known.get(argument.text) ?? imported(argument.text);
       if (resolved) result.push(resolved);
     }
   }
   return result;
+}
+
+function explicitStatusLiterals(handler: Handler): StatusLiteral[] {
+  const response = responseName(handler);
+  if (!response || !handler.body) return [];
+  const responseIdentifier = response;
+  const literals: StatusLiteral[] = [];
+  function visit(node: ts.Node): void {
+    if (node !== handler.body && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
+    if (ts.isCallExpression(node)) {
+      const method = responseCall(node, responseIdentifier);
+      const argument = node.arguments[0];
+      const hasExplicitCode = method === "status" || method === "sendStatus" || (method === "redirect" && node.arguments.length > 1);
+      const code = hasExplicitCode ? numericArgument(argument) : undefined;
+      if (code !== undefined && argument) literals.push({ code, range: { start: argument.getStart(), end: argument.end } });
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(handler.body);
+  return literals;
 }
 
 function responseName(handler: Handler): string | undefined {
@@ -178,13 +243,13 @@ function extractStatuses(handler: Handler): StatusFact[] {
         hasStatusSetter ||= method === "status";
         const argument = node.arguments[0];
         const code = numericArgument(argument);
-        if (code !== undefined && argument) facts.push({ kind: "explicit", code, range: { start: argument.getStart(), end: argument.end } });
+        if (code !== undefined) facts.push({ kind: "explicit", code });
         else facts.push({ kind: "dynamic" });
       } else if (method === "redirect") {
         const first = node.arguments[0];
         if (node.arguments.length > 1) {
           const code = numericArgument(first);
-          if (code !== undefined && first) facts.push({ kind: "explicit", code, range: { start: first.getStart(), end: first.end } });
+          if (code !== undefined) facts.push({ kind: "explicit", code });
           else facts.push({ kind: "dynamic" });
         } else facts.push({ kind: "implicit", code: 302 });
       } else if (["send", "json", "jsonp", "end", "render", "sendFile", "download"].includes(method ?? "")) {
@@ -206,19 +271,17 @@ function extractStatuses(handler: Handler): StatusFact[] {
 }
 
 function combineStatuses(handlers: readonly Handler[]): StatusFact[] {
-  const explicit = new Map<number, SourceRange[]>();
+  const explicit = new Set<number>();
   const implicit = new Set<number>();
   let dynamic = false;
   for (const handler of handlers) {
     for (const fact of extractStatuses(handler)) {
-      if (fact.kind === "explicit") explicit.set(fact.code, [...(explicit.get(fact.code) ?? []), ...(fact.ranges ?? [fact.range])]);
+      if (fact.kind === "explicit") explicit.add(fact.code);
       else if (fact.kind === "implicit") implicit.add(fact.code);
       else dynamic = true;
     }
   }
-  const result: StatusFact[] = [...explicit]
-    .sort(([left], [right]) => left - right)
-    .map(([code, ranges]) => ({ kind: "explicit", code, range: ranges[0] as SourceRange, ranges }));
+  const result: StatusFact[] = [...explicit].sort((left, right) => left - right).map((code) => ({ kind: "explicit", code }));
   result.push(...[...implicit].sort((left, right) => left - right).map((code) => ({ kind: "implicit" as const, code })));
   if (dynamic) result.push({ kind: "dynamic" });
   result.sort((left, right) => {
@@ -229,18 +292,39 @@ function combineStatuses(handlers: readonly Handler[]): StatusFact[] {
   return result;
 }
 
-export function analyzeDocument(text: string, fileName: string): AnalysisResult {
+export function analyzeDocument(text: string, fileName: string, resolveImport?: ModuleResolver): AnalysisResult {
   const scriptKind = /\.[cm]?jsx?$/i.test(fileName) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, scriptKind);
   const receivers = expressBindings(source);
   const knownHandlers = handlerMap(source);
+  const localHandlers = new Set([...knownHandlers.values(), ...exportedHandlerMap(source).values()]);
+  const importBindings = importedHandlerBindings(source);
+  const importedModules = new Map<string, Map<string, Handler> | undefined>();
+  const dependencies = new Set<string>();
+  const importedHandler = (name: string): Handler | undefined => {
+    const binding = importBindings.get(name);
+    if (!binding || !binding.moduleSpecifier.startsWith(".") || !resolveImport) return undefined;
+    if (!importedModules.has(binding.moduleSpecifier)) {
+      const imported: ImportedSource | undefined = resolveImport(binding.moduleSpecifier, fileName);
+      if (!imported) {
+        importedModules.set(binding.moduleSpecifier, undefined);
+        return undefined;
+      }
+      dependencies.add(imported.fileName);
+      const importedKind = /\.[cm]?jsx?$/i.test(imported.fileName) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+      const importedSource = ts.createSourceFile(imported.fileName, imported.text, ts.ScriptTarget.Latest, true, importedKind);
+      importedModules.set(binding.moduleSpecifier, exportedHandlerMap(importedSource));
+    }
+    return importedModules.get(binding.moduleSpecifier)?.get(binding.exportedName);
+  };
   const routes: RouteAnalysis[] = [];
 
   function visit(node: ts.Node): void {
     if (ts.isCallExpression(node)) {
       const route = routeCall(node, receivers);
       if (route) {
-        const handlers = handlerFunctions(node, receivers, source, knownHandlers);
+        const handlers = handlerFunctions(node, receivers, source, knownHandlers, importedHandler);
+        for (const handler of handlers) if (handler.getSourceFile() === source) localHandlers.add(handler);
         routes.push({
           ...route,
           range: { start: node.getStart(source), end: node.end },
@@ -253,5 +337,12 @@ export function analyzeDocument(text: string, fileName: string): AnalysisResult 
 
   visit(source);
   routes.sort((left, right) => left.range.start - right.range.start || left.range.end - right.range.end);
-  return { routes };
+  const seenLiterals = new Set<string>();
+  const statusLiterals = [...localHandlers].flatMap(explicitStatusLiterals).filter(({ range }) => {
+    const key = `${range.start}:${range.end}`;
+    if (seenLiterals.has(key)) return false;
+    seenLiterals.add(key);
+    return true;
+  }).sort((left, right) => left.range.start - right.range.start);
+  return { routes, statusLiterals, dependencies: [...dependencies] };
 }

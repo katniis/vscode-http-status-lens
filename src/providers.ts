@@ -1,25 +1,80 @@
 import * as vscode from "vscode";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import ts from "typescript";
 import { analyzeDocument } from "./analyzer.js";
 import { getCompletionCandidates, matchCompletionPrefix } from "./completions.js";
-import type { AnalysisResult } from "./model.js";
+import type { AnalysisResult, ModuleResolver } from "./model.js";
 import { formatRouteTitle, formatStatusHover } from "./presentation.js";
 import { getStatus } from "./statuses.js";
 
 export class DocumentAnalysisCache {
   private readonly entries = new Map<string, { version: number; result: AnalysisResult }>();
+  private readonly dependenciesByDocument = new Map<string, Set<string>>();
+  private readonly dependentsByDependency = new Map<string, Set<string>>();
 
   get(document: vscode.TextDocument): AnalysisResult {
     const key = document.uri.toString();
     const cached = this.entries.get(key);
     if (cached?.version === document.version) return cached.result;
-    const result = analyzeDocument(document.getText(), document.fileName);
+    this.forget(key);
+    const result = analyzeDocument(document.getText(), document.fileName, createModuleResolver(document));
     this.entries.set(key, { version: document.version, result });
+    const dependencies = new Set(result.dependencies.map((fileName) => vscode.Uri.file(fileName).toString()));
+    this.dependenciesByDocument.set(key, dependencies);
+    for (const dependency of dependencies) {
+      const dependents = this.dependentsByDependency.get(dependency) ?? new Set<string>();
+      dependents.add(key);
+      this.dependentsByDependency.set(dependency, dependents);
+    }
     return result;
   }
 
   delete(uri: vscode.Uri): void {
-    this.entries.delete(uri.toString());
+    this.forget(uri.toString());
   }
+
+  invalidate(uri: vscode.Uri): void {
+    const key = uri.toString();
+    const dependents = [...(this.dependentsByDependency.get(key) ?? [])];
+    this.forget(key);
+    for (const dependent of dependents) this.forget(dependent);
+  }
+
+  private forget(key: string): void {
+    this.entries.delete(key);
+    for (const dependency of this.dependenciesByDocument.get(key) ?? []) {
+      const dependents = this.dependentsByDependency.get(dependency);
+      dependents?.delete(key);
+      if (!dependents?.size) this.dependentsByDependency.delete(dependency);
+    }
+    this.dependenciesByDocument.delete(key);
+  }
+}
+
+function createModuleResolver(document: vscode.TextDocument): ModuleResolver | undefined {
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+  if (!workspaceFolder) return undefined;
+  const compilerOptions: ts.CompilerOptions = {
+    allowJs: true,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+  };
+  return (specifier, containingFile) => {
+    if (!specifier.startsWith(".")) return undefined;
+    const resolved = ts.resolveModuleName(specifier, containingFile, compilerOptions, ts.sys).resolvedModule;
+    if (!resolved) return undefined;
+    const fileName = path.resolve(resolved.resolvedFileName);
+    const relative = path.relative(workspaceFolder.uri.fsPath, fileName);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined;
+    const uri = vscode.Uri.file(fileName);
+    const openDocument = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === uri.toString());
+    try {
+      return { fileName, text: openDocument?.getText() ?? readFileSync(fileName, "utf8") };
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 function supported(document: vscode.TextDocument): boolean {
@@ -60,15 +115,11 @@ export function createHoverProvider(cache: DocumentAnalysisCache, onError: (erro
       if (token.isCancellationRequested || !supported(document)) return undefined;
       try {
         const offset = document.offsetAt(position);
-        for (const route of cache.get(document).routes) {
-          for (const status of route.statuses) {
-            if (status.kind !== "explicit") continue;
-            for (const range of status.ranges ?? [status.range]) {
-              if (offset >= range.start && offset < range.end) {
-                const hoverRange = new vscode.Range(document.positionAt(range.start), document.positionAt(range.end));
-                return new vscode.Hover(formatStatusHover(status.code), hoverRange);
-              }
-            }
+        for (const status of cache.get(document).statusLiterals) {
+          const { range } = status;
+          if (offset >= range.start && offset < range.end) {
+            const hoverRange = new vscode.Range(document.positionAt(range.start), document.positionAt(range.end));
+            return new vscode.Hover(formatStatusHover(status.code), hoverRange);
           }
         }
         return undefined;
@@ -92,16 +143,11 @@ export function createRouteDecorations(cache: DocumentAnalysisCache, onError: (e
     if (!supported(editor.document)) return;
     try {
       const ranges = new Map(decorations.map((decoration) => [decoration, [] as vscode.Range[]]));
-      const routes = cache.get(editor.document).routes;
-      for (const route of routes) {
-        for (const status of route.statuses) {
-          if (status.kind !== "explicit") continue;
-          const statusDecoration = statusColors.get(getStatus(status.code)?.category ?? "");
-          if (!statusDecoration) continue;
-          for (const range of status.ranges ?? [status.range]) {
-            ranges.get(statusDecoration)?.push(new vscode.Range(editor.document.positionAt(range.start), editor.document.positionAt(range.end)));
-          }
-        }
+      for (const status of cache.get(editor.document).statusLiterals) {
+        const statusDecoration = statusColors.get(getStatus(status.code)?.category ?? "");
+        if (!statusDecoration) continue;
+        const { range } = status;
+        ranges.get(statusDecoration)?.push(new vscode.Range(editor.document.positionAt(range.start), editor.document.positionAt(range.end)));
       }
       for (const decoration of decorations) editor.setDecorations(decoration, ranges.get(decoration) ?? []);
     } catch (error) {

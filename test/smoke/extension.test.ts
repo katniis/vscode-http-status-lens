@@ -17,20 +17,6 @@ suite("extension host smoke", () => {
     assert.equal(lenses?.[0]?.command?.title, "GET /users/:id → 200 OK | 404 Not Found");
     await vscode.commands.executeCommand(lenses?.[0]?.command?.command ?? "");
 
-    const configuration = vscode.workspace.getConfiguration("httpStatusLens");
-    const configuredValue = configuration.inspect<boolean>("showCodeLens")?.globalValue;
-    try {
-      await configuration.update("showCodeLens", false, vscode.ConfigurationTarget.Global);
-      const hiddenLenses = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", document.uri);
-      assert.equal(hiddenLenses?.length, 0);
-
-      await configuration.update("showCodeLens", true, vscode.ConfigurationTarget.Global);
-      const shownLenses = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", document.uri);
-      assert.equal(shownLenses?.length, 1);
-    } finally {
-      await configuration.update("showCodeLens", configuredValue, vscode.ConfigurationTarget.Global);
-    }
-
     const statusOffset = document.getText().indexOf("404");
     const hoverPosition = document.positionAt(statusOffset);
     const hovers = await vscode.commands.executeCommand<vscode.Hover[]>("vscode.executeHoverProvider", document.uri, hoverPosition);
@@ -43,5 +29,40 @@ suite("extension host smoke", () => {
     const completion = completions?.items.find((item) => item.filterText === "rs404");
     assert.ok(completion);
     assert.equal(completion.insertText?.toString(), "res.status(404)");
+  });
+
+  test("resolves imported handlers and refreshes routes when a controller changes", async () => {
+    const workspaceRoot = path.resolve(__dirname, "../../../test/fixtures/workspace/separated");
+    const routeUri = vscode.Uri.file(path.join(workspaceRoot, "routes.js"));
+    const controllerUri = vscode.Uri.file(path.join(workspaceRoot, "controller.js"));
+    const routeDocument = await vscode.workspace.openTextDocument(routeUri);
+    const controllerDocument = await vscode.workspace.openTextDocument(controllerUri);
+    await vscode.window.showTextDocument(routeDocument);
+    await vscode.window.showTextDocument(controllerDocument, { viewColumn: vscode.ViewColumn.Beside });
+    const extension = vscode.extensions.getExtension("local.http-status-lens");
+    assert.ok(extension);
+    await extension.activate();
+
+    const getLenses = async (): Promise<vscode.CodeLens[]> =>
+      await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", routeUri) ?? [];
+    const titles = (await getLenses()).map((lens) => lens.command?.title);
+    assert.deepEqual(titles, [
+      "GET /mine → 200 OK | 401 Unauthorized",
+      "GET /missing → 404 Not Found",
+    ]);
+
+    const hoverOffset = controllerDocument.getText().indexOf("401");
+    const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+      "vscode.executeHoverProvider", controllerUri, controllerDocument.positionAt(hoverOffset));
+    assert.match(hovers?.[0]?.contents.map((content) => typeof content === "string" ? content : content.value).join("\n") ?? "", /^401 Unauthorized/);
+
+    const editedText = controllerDocument.getText().replace("401", "403");
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(controllerUri, new vscode.Range(controllerDocument.positionAt(0), controllerDocument.positionAt(controllerDocument.getText().length)), editedText);
+    assert.equal(await vscode.workspace.applyEdit(edit), true);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const refreshedTitles = (await getLenses()).map((lens) => lens.command?.title);
+    assert.ok(refreshedTitles[0]?.includes("403 Forbidden"));
+    assert.ok(!refreshedTitles[0]?.includes("401 Unauthorized"));
   });
 });

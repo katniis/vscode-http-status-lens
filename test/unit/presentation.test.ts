@@ -19,8 +19,8 @@ function route(statuses: RouteAnalysis["statuses"], path = "/users"): RouteAnaly
 describe("presentation", () => {
   it("formatsSortedRouteSummary", () => {
     assert.equal(presentation().formatRouteTitle(route([
-      { kind: "explicit", code: 404, range: { start: 4, end: 7 } },
-      { kind: "explicit", code: 200, range: { start: 1, end: 4 } },
+      { kind: "explicit", code: 404 },
+      { kind: "explicit", code: 200 },
     ])), "GET /users → 200 OK | 404 Not Found");
   });
 
