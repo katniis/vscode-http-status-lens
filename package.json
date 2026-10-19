@@ -2,7 +2,7 @@
   "name": "http-status-lens",
   "displayName": "HTTP Status Lens",
   "description": "See possible Express response statuses in your code.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "local",
   "license": "MIT",
   "engines": {

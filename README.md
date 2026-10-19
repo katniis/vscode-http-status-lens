@@ -24,7 +24,7 @@ From a checkout of this repository, build and install the VSIX:
 ```sh
 npm install
 npm run package -- --no-rewrite-relative-links
-code --install-extension ./http-status-lens-0.1.0.vsix
+code --install-extension ./http-status-lens-0.1.1.vsix
 ```
 
 Open a supported Express `.js` or `.ts` file. A CodeLens above each recognized route lists the possible response statuses. For example, `GET /users/:id → 200 OK | 404 Not Found` means the handler contains paths that return either status; it does not predict which one will run.
@@ -39,9 +39,9 @@ To hide the route CodeLens, set `httpStatusLens.showCodeLens` to `false` in VS C
 
 ## Install through the VS Code UI
 
-Install this extension in **Visual Studio Code**, not Visual Studio. Open the Extensions view, select **… → Install from VSIX…**, and choose `http-status-lens-0.1.0.vsix`.
+Install this extension in **Visual Studio Code**, not Visual Studio. Open the Extensions view, select **… → Install from VSIX…**, and choose `http-status-lens-0.1.1.vsix`.
 
-If Visual Studio's VSIX Installer reports, “One or more extensions are for Visual Studio Code. Try installing them in Visual Studio Code,” close that installer and install the file from VS Code using the steps above. You can also run `code --install-extension ./http-status-lens-0.1.0.vsix` from a terminal.
+If Visual Studio's VSIX Installer reports, “One or more extensions are for Visual Studio Code. Try installing them in Visual Studio Code,” close that installer and install the file from VS Code using the steps above. You can also run `code --install-extension ./http-status-lens-0.1.1.vsix` from a terminal.
 
 If the screenshot is missing from Extension Details after updating the README, rebuild and reinstall the VSIX so it contains the latest README.
 
