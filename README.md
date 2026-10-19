@@ -4,7 +4,7 @@ HTTP Status Lens shows possible HTTP response statuses beside Express routes whi
 
 When a handler has several response branches, the possible statuses can be easy to miss. HTTP Status Lens brings those results up to the route declaration, without running your app.
 
-![HTTP Status Lens showing the possible response statuses above an Express route](images/http-status-lens-demo.png)
+![HTTP Status Lens showing the possible response statuses above an Express route](https://raw.githubusercontent.com/katniis/vscode-http-status-lens/main/images/http-status-lens-demo.png)
 
 ## Features
 
@@ -39,7 +39,11 @@ To hide the route CodeLens, set `httpStatusLens.showCodeLens` to `false` in VS C
 
 ## Install through the VS Code UI
 
-After building the VSIX, open the Extensions view, select **… → Install from VSIX…**, and choose `http-status-lens-0.1.0.vsix`.
+Install this extension in **Visual Studio Code**, not Visual Studio. Open the Extensions view, select **… → Install from VSIX…**, and choose `http-status-lens-0.1.0.vsix`.
+
+If Visual Studio's VSIX Installer reports, “One or more extensions are for Visual Studio Code. Try installing them in Visual Studio Code,” close that installer and install the file from VS Code using the steps above. You can also run `code --install-extension ./http-status-lens-0.1.0.vsix` from a terminal.
+
+If the screenshot is missing from Extension Details after updating the README, rebuild and reinstall the VSIX so it contains the latest README.
 
 ## Supported code
 
