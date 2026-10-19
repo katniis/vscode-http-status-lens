@@ -11,7 +11,7 @@ export interface SourceRange {
 }
 
 export type StatusFact =
-  | { readonly kind: "explicit"; readonly code: number; readonly range: SourceRange }
+  | { readonly kind: "explicit"; readonly code: number; readonly range: SourceRange; readonly ranges?: readonly SourceRange[] }
   | { readonly kind: "implicit"; readonly code: number }
   | { readonly kind: "dynamic" };
 
