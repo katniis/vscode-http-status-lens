@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { analyzeDocument } from "./analyzer.js";
+import { getCompletionCandidates, matchCompletionPrefix } from "./completions.js";
 import type { AnalysisResult } from "./model.js";
 import { formatRouteTitle, formatStatusHover } from "./presentation.js";
 
@@ -71,6 +72,31 @@ export function createHoverProvider(cache: DocumentAnalysisCache, onError: (erro
       } catch (error) {
         onError(error);
         return undefined;
+      }
+    },
+  };
+}
+
+export function createCompletionProvider(onError: (error: unknown) => void): vscode.CompletionItemProvider {
+  return {
+    provideCompletionItems(document, position, token) {
+      if (token.isCancellationRequested || !supported(document)) return [];
+      try {
+        const line = document.lineAt(position.line).text.slice(0, position.character);
+        const match = matchCompletionPrefix(line);
+        if (!match) return [];
+        const range = new vscode.Range(position.line, match.start, position.line, position.character);
+        return getCompletionCandidates(match.kind, match.query).map((candidate) => {
+          const item = new vscode.CompletionItem(candidate.label, vscode.CompletionItemKind.Snippet);
+          item.detail = candidate.detail;
+          item.insertText = candidate.insertText;
+          item.filterText = `${match.kind === "status" ? "rs" : "rss"}${candidate.code}`;
+          item.range = range;
+          return item;
+        });
+      } catch (error) {
+        onError(error);
+        return [];
       }
     },
   };
