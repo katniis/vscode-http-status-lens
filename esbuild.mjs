@@ -1,4 +1,7 @@
 import esbuild from "esbuild";
+import { rm } from "node:fs/promises";
+
+await rm("dist/extension.js.map", { force: true });
 
 await esbuild.build({
   entryPoints: ["src/extension.ts"],
@@ -7,6 +10,5 @@ await esbuild.build({
   platform: "node",
   target: "node20",
   external: ["vscode"],
-  outfile: "dist/extension.js",
-  sourcemap: true
+  outfile: "dist/extension.js"
 });

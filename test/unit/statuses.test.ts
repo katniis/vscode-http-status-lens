@@ -48,5 +48,6 @@ describe("status registry", () => {
     const codes = registry().getAllStatuses().map(({ code }) => code);
     const nodeCodes = Object.keys(STATUS_CODES).map(Number).sort((left, right) => left - right);
     assert.deepEqual(codes, nodeCodes);
+    assert.ok(registry().getAllStatuses().every(({ description }) => description.length > 0));
   });
 });

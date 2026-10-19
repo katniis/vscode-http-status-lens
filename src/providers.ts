@@ -28,6 +28,7 @@ function supported(document: vscode.TextDocument): boolean {
 type RefreshableCodeLensProvider = vscode.CodeLensProvider & {
   readonly onDidChangeCodeLenses: vscode.Event<void>;
   refresh(): void;
+  dispose(): void;
 };
 
 export function createCodeLensProvider(cache: DocumentAnalysisCache, onError: (error: unknown) => void): RefreshableCodeLensProvider {
@@ -35,13 +36,14 @@ export function createCodeLensProvider(cache: DocumentAnalysisCache, onError: (e
   return {
     onDidChangeCodeLenses: emitter.event,
     refresh: () => emitter.fire(),
+    dispose: () => emitter.dispose(),
     provideCodeLenses(document, token) {
       if (token.isCancellationRequested || !supported(document)) return [];
       try {
         return cache.get(document).routes.map((route) => {
           const position = document.positionAt(route.range.start);
           const line = new vscode.Range(position.line, 0, position.line, 0);
-          return new vscode.CodeLens(line, { title: formatRouteTitle(route), command: "" });
+          return new vscode.CodeLens(line, { title: formatRouteTitle(route), command: "httpStatusLens.noop" });
         });
       } catch (error) {
         onError(error);

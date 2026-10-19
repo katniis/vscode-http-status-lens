@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["node", "vscode", "mocha"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.test.ts"]
 }
