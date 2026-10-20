@@ -1,5 +1,5 @@
 import ts from "typescript";
-import type { AnalysisResult, ImportedSource, ModuleResolver, RouteAnalysis, StatusFact, StatusLiteral } from "./model.js";
+import type { AnalysisResult, DocumentAnalyzer, ImportedSource, ModuleResolver, RouteAnalysis, StatusFact, StatusLiteral } from "./model.js";
 import type { StatusSuggestion } from "./model.js";
 import { inferStatusFromContext } from "./status-suggestions.js";
 
@@ -433,3 +433,8 @@ export function analyzeDocument(text: string, fileName: string, resolveImport?: 
     .sort((left, right) => (left.range.end - left.range.start) - (right.range.end - right.range.start));
   return { routes, statusLiterals, dependencies: [...dependencies], statusSuggestions };
 }
+
+/** The current and only analyzer implementation: Express analysis for JS/TS source. */
+export const expressDocumentAnalyzer: DocumentAnalyzer = {
+  analyze: ({ text, fileName }, resolveImport) => analyzeDocument(text, fileName, resolveImport),
+};

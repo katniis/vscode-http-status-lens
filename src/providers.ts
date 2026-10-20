@@ -2,9 +2,9 @@ import * as vscode from "vscode";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { analyzeDocument } from "./analyzer.js";
+import { expressDocumentAnalyzer } from "./analyzer.js";
 import { getCompletionCandidates, matchCompletionPrefix } from "./completions.js";
-import type { AnalysisResult, ModuleResolver } from "./model.js";
+import type { AnalysisResult, DocumentAnalyzer, ModuleResolver } from "./model.js";
 import { formatRouteTitle, formatStatusHover } from "./presentation.js";
 import { getStatus } from "./statuses.js";
 
@@ -13,12 +13,14 @@ export class DocumentAnalysisCache {
   private readonly dependenciesByDocument = new Map<string, Set<string>>();
   private readonly dependentsByDependency = new Map<string, Set<string>>();
 
+  constructor(private readonly analyzer: DocumentAnalyzer = expressDocumentAnalyzer) {}
+
   get(document: vscode.TextDocument): AnalysisResult {
     const key = document.uri.toString();
     const cached = this.entries.get(key);
     if (cached?.version === document.version) return cached.result;
     this.forget(key);
-    const result = analyzeDocument(document.getText(), document.fileName, createModuleResolver(document));
+    const result = this.analyzer.analyze({ text: document.getText(), fileName: document.fileName }, createModuleResolver(document));
     this.entries.set(key, { version: document.version, result });
     const dependencies = new Set(result.dependencies.map((fileName) => vscode.Uri.file(fileName).toString()));
     this.dependenciesByDocument.set(key, dependencies);
@@ -87,6 +89,10 @@ type RefreshableCodeLensProvider = vscode.CodeLensProvider & {
   dispose(): void;
 };
 
+export interface RefreshableRouteDecorations extends vscode.Disposable {
+  refresh(uri?: vscode.Uri): void;
+}
+
 export function createCodeLensProvider(cache: DocumentAnalysisCache, onError: (error: unknown) => void): RefreshableCodeLensProvider {
   const emitter = new vscode.EventEmitter<void>();
   return {
@@ -131,7 +137,7 @@ export function createHoverProvider(cache: DocumentAnalysisCache, onError: (erro
   };
 }
 
-export function createRouteDecorations(cache: DocumentAnalysisCache, onError: (error: unknown) => void): vscode.Disposable {
+export function createRouteDecorations(cache: DocumentAnalysisCache, onError: (error: unknown) => void): RefreshableRouteDecorations {
   const statusColors = new Map([
     ["Informational", "#C586C0"], ["Success", "#4EC9B0"], ["Redirection", "#4FC1FF"],
     ["Client error", "#CE9178"], ["Server error", "#F14C4C"],
@@ -159,15 +165,19 @@ export function createRouteDecorations(cache: DocumentAnalysisCache, onError: (e
   const subscriptions = [
     vscode.window.onDidChangeActiveTextEditor(updateVisible),
     vscode.window.onDidChangeVisibleTextEditors(updateVisible),
-    vscode.workspace.onDidChangeTextDocument(({ document }) => {
-      for (const editor of vscode.window.visibleTextEditors) if (editor.document === document) apply(editor);
-    }),
   ];
   updateVisible();
-  return new vscode.Disposable(() => {
-    for (const subscription of subscriptions) subscription.dispose();
-    for (const decoration of decorations) decoration.dispose();
-  });
+  return {
+    refresh(uri) {
+      for (const editor of vscode.window.visibleTextEditors) {
+        if (!uri || editor.document.uri.toString() === uri.toString()) apply(editor);
+      }
+    },
+    dispose() {
+      for (const subscription of subscriptions) subscription.dispose();
+      for (const decoration of decorations) decoration.dispose();
+    },
+  };
 }
 
 export function createCompletionProvider(cache: DocumentAnalysisCache, onError: (error: unknown) => void): vscode.CompletionItemProvider {

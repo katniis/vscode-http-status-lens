@@ -34,6 +34,17 @@ export interface AnalysisResult {
   readonly statusSuggestions: readonly StatusSuggestion[];
 }
 
+/** Immutable source data consumed by the active document analyzer. */
+export interface DocumentSnapshot {
+  readonly text: string;
+  readonly fileName: string;
+}
+
+/** Internal seam for producing the normalized result shared by providers. */
+export interface DocumentAnalyzer {
+  analyze(snapshot: DocumentSnapshot, resolveImport?: ModuleResolver): AnalysisResult;
+}
+
 export interface StatusSuggestion {
   readonly code: number;
   readonly range: SourceRange;

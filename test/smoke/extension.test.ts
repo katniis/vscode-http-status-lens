@@ -1,9 +1,30 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import * as vscode from "vscode";
+import { DocumentAnalysisCache } from "../../src/providers";
 import { suite, test } from "mocha";
 
 suite("extension host smoke", () => {
+  test("reuses an analysis snapshot until invalidation or deletion", async () => {
+    let calls = 0;
+    const cache = new DocumentAnalysisCache({
+      analyze: ({ text, fileName }) => {
+        calls++;
+        return { routes: [], statusLiterals: [], statusSuggestions: [], dependencies: [`${fileName}:${text.length}`] };
+      },
+    });
+    const document = await vscode.workspace.openTextDocument({ language: "typescript", content: "const value = 1;" });
+    assert.equal(cache.get(document).dependencies[0], `${document.fileName}:${document.getText().length}`);
+    cache.get(document);
+    assert.equal(calls, 1, "same-version provider reads should share one result");
+    cache.invalidate(document.uri);
+    cache.get(document);
+    assert.equal(calls, 2, "an invalidated version should be analyzed once");
+    cache.delete(document.uri);
+    cache.get(document);
+    assert.equal(calls, 3, "deleting on document close should release the cached result");
+  });
+
   test("activatesAndRegistersProviders", async () => {
     const fixture = path.resolve(__dirname, "../../../test/fixtures/workspace/routes.ts");
     const document = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));

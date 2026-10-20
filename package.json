@@ -2,7 +2,7 @@
   "name": "http-status-lens",
   "displayName": "HTTP Status Lens",
   "description": "See possible Express response statuses in your code.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "local",
   "license": "MIT",
   "repository": {
@@ -39,12 +39,13 @@
   },
   "scripts": {
     "check": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "lint": "eslint src test esbuild.mjs .vscode-test.mjs",
+    "lint": "eslint src test scripts esbuild.mjs .vscode-test.mjs .vscode-benchmark.mjs",
     "build": "node esbuild.mjs",
     "compile-tests": "tsc -p tsconfig.test.json",
     "test:unit": "npm run compile-tests && mocha \"out/test/unit/**/*.test.js\"",
     "test:smoke": "vscode-test --label smoke",
     "test": "npm run test:unit && npm run test:smoke",
+    "benchmark": "npm run compile-tests && node scripts/benchmark.mjs",
     "package": "npm run build && vsce package"
   },
   "devDependencies": {

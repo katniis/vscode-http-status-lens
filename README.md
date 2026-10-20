@@ -26,7 +26,7 @@ From a checkout of this repository, build and install the VSIX:
 ```sh
 npm install
 npm run package -- --no-rewrite-relative-links
-code --install-extension ./http-status-lens-0.1.1.vsix
+code --install-extension ./http-status-lens-0.1.2.vsix
 ```
 
 Open a supported Express `.js` or `.ts` file. A CodeLens above each recognized route lists the possible response statuses. For example, `GET /users/:id → 200 OK | 404 Not Found` means the handler contains paths that return either status; it does not predict which one will run.
@@ -41,9 +41,9 @@ To hide the route CodeLens, set `httpStatusLens.showCodeLens` to `false` in VS C
 
 ## Install through the VS Code UI
 
-Install this extension in **Visual Studio Code**, not Visual Studio. Open the Extensions view, select **… → Install from VSIX…**, and choose `http-status-lens-0.1.1.vsix`.
+Install this extension in **Visual Studio Code**, not Visual Studio. Open the Extensions view, select **… → Install from VSIX…**, and choose `http-status-lens-0.1.2.vsix`.
 
-If Visual Studio's VSIX Installer reports, “One or more extensions are for Visual Studio Code. Try installing them in Visual Studio Code,” close that installer and install the file from VS Code using the steps above. You can also run `code --install-extension ./http-status-lens-0.1.1.vsix` from a terminal.
+If Visual Studio's VSIX Installer reports, “One or more extensions are for Visual Studio Code. Try installing them in Visual Studio Code,” close that installer and install the file from VS Code using the steps above. You can also run `code --install-extension ./http-status-lens-0.1.2.vsix` from a terminal.
 
 If the screenshot is missing from Extension Details after updating the README, rebuild and reinstall the VSIX so it contains the latest README.
 
@@ -86,6 +86,10 @@ npm run package
 ```
 
 The unit tests exercise the analyzer and formatting logic; the smoke test launches an isolated VS Code 1.142 extension host.
+
+For opt-in performance measurements, build/package first, then run `npm run benchmark -- baseline-01` (or use a distinct label such as `candidate-01`). The command records cold and warm analysis, completion latency, process heap/RSS, and bundle/VSIX sizes under the ignored `benchmark-output/` directory. For comparable results, use the same machine, Node.js version, and VS Code test version for ten baseline and ten candidate runs. Timings are diagnostic and are not CI gates. Set `HTTP_STATUS_TEST_VSCODE` to an existing isolated VS Code test executable to avoid downloading the test host; the runner uses a separate test profile and never attaches to an open editor window.
+
+See [the optimization measurements](docs/performance-results.md) for the paired results and parser evaluation.
 
 ## Contributing
 
