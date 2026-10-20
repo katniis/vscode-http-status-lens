@@ -18,7 +18,7 @@ export function activate(context: vscode.ExtensionContext): void {
     createRouteDecorations(cache, onError),
     vscode.languages.registerCodeLensProvider(selector, codeLenses),
     vscode.languages.registerHoverProvider(selector, createHoverProvider(cache, onError)),
-    vscode.languages.registerCompletionItemProvider(selector, createCompletionProvider(onError)),
+    vscode.languages.registerCompletionItemProvider(selector, createCompletionProvider(cache, onError)),
     vscode.workspace.onDidCloseTextDocument((document) => cache.delete(document.uri)),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("httpStatusLens.showCodeLens")) codeLenses.refresh();

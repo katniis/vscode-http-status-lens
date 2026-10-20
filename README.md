@@ -13,7 +13,7 @@ When a handler has several response branches, the possible statuses can be easy 
 - A read-only CodeLens above supported routes, for example `GET /users/:id → 200 OK | 404 Not Found`.
 - Color-coded explicit response status code literals in source.
 - Hover explanations on numeric literals passed to recognized `res.status(...)` and `res.sendStatus(...)` calls.
-- IntelliSense shortcuts: type `rs404` for `res.status(404)` or `rss404` for `res.sendStatus(404)`, then accept with Tab or Enter. Shortcuts only offer recognized status codes and never expand automatically.
+- IntelliSense shortcuts: type `rs404` for `res.status(404)` or `rss404` for `res.sendStatus(404)`, then accept with Tab or Enter. In a clear handler branch, the matching status is ranked first; all recognized statuses remain available and nothing expands automatically.
 
 The CodeLens lists possible statuses in numeric order. It marks inferred defaults as `(implicit)`, uses `dynamic status` when an expression cannot be resolved, and shows `No direct status detected` when no result can be proven.
 
@@ -74,7 +74,7 @@ Analysis runs locally on the current document and directly imported handler file
 
 ## Development
 
-Requires Node.js 20 or newer and VS Code 1.142.0 or newer.
+Requires Node.js 22 or newer for development tools and VS Code 1.142.0 or newer. The packaged extension targets the Node.js 20 runtime available in its supported VS Code host.
 
 ```sh
 npm install

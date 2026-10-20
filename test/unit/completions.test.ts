@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "mocha";
 
-type Candidate = { code: number; label: string; detail: string; insertText: string };
+type Candidate = { code: number; label: string; detail: string; insertText: string; suggested?: boolean };
+type Suggestion = { code: number; detail: string };
 type Completions = {
   matchCompletionPrefix(linePrefix: string): { kind: "status" | "sendStatus"; query: string; start: number } | undefined;
-  getCompletionCandidates(kind: "status" | "sendStatus", query: string): readonly Candidate[];
+  getCompletionCandidates(kind: "status" | "sendStatus", query: string, suggestion?: Suggestion): readonly Candidate[];
 };
 
 function completions(): Completions {
@@ -53,6 +54,18 @@ describe("completions", () => {
 
   it("formatsCandidateDetailsWithoutCenterDots", () => {
     assert.equal(completions().getCompletionCandidates("status", "404")[0]?.detail, "Not Found (Client error)");
+  });
+
+  it("ranksTheContextSuggestionWithoutRemovingOtherCandidates", () => {
+    const { getCompletionCandidates } = completions();
+    for (const kind of ["status", "sendStatus"] as const) {
+      const candidates = getCompletionCandidates(kind, "", { code: 404, detail: "Suggested from this branch: 404 Not Found" });
+      assert.equal(candidates[0]?.code, 404);
+      assert.equal(candidates.filter(({ code }) => code === 404).length, 1);
+      assert.equal(candidates.some(({ code }) => code === 200), true);
+      assert.equal(candidates[0]?.suggested, true);
+      assert.match(candidates[0]?.detail ?? "", /Suggested from this branch/);
+    }
   });
 
   it("rejectsPrefixEmbeddedInIdentifier", () => {

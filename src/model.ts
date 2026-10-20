@@ -31,6 +31,13 @@ export interface AnalysisResult {
   readonly routes: readonly RouteAnalysis[];
   readonly statusLiterals: readonly StatusLiteral[];
   readonly dependencies: readonly string[];
+  readonly statusSuggestions: readonly StatusSuggestion[];
+}
+
+export interface StatusSuggestion {
+  readonly code: number;
+  readonly range: SourceRange;
+  readonly detail: string;
 }
 
 export interface ImportedSource {

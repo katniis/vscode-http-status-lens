@@ -1,10 +1,12 @@
 import { getAllStatuses } from "./statuses.js";
+import type { InferredStatus } from "./status-suggestions.js";
 
 export interface CompletionCandidate {
   readonly code: number;
   readonly label: string;
   readonly detail: string;
   readonly insertText: string;
+  readonly suggested?: boolean;
 }
 
 export function matchCompletionPrefix(linePrefix: string): { kind: "status" | "sendStatus"; query: string; start: number } | undefined {
@@ -17,13 +19,15 @@ export function matchCompletionPrefix(linePrefix: string): { kind: "status" | "s
   };
 }
 
-export function getCompletionCandidates(kind: "status" | "sendStatus", query: string): readonly CompletionCandidate[] {
-  return getAllStatuses()
+export function getCompletionCandidates(kind: "status" | "sendStatus", query: string, suggestion?: InferredStatus): readonly CompletionCandidate[] {
+  const candidates = getAllStatuses()
     .filter((status) => String(status.code).startsWith(query))
     .map((status) => ({
       code: status.code,
       label: `${status.code} ${status.phrase}`,
-      detail: `${status.phrase} (${status.category})`,
+      detail: `${status.phrase} (${status.category})${status.code === suggestion?.code ? ` — ${suggestion.detail}` : ""}`,
       insertText: `res.${kind === "status" ? "status" : "sendStatus"}(${status.code})`,
+      suggested: status.code === suggestion?.code,
     }));
+  return candidates.sort((left, right) => Number(right.suggested) - Number(left.suggested));
 }

@@ -2,15 +2,22 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "mocha";
+import { getAllStatuses } from "../../src/statuses.js";
 
 type RouteAnalysis = { method: string; path: string; range: { start: number; end: number }; statuses: readonly { kind: string; code?: number; range?: { start: number; end: number } }[] };
 type StatusLiteral = { code: number; range: { start: number; end: number } };
 type ImportedSource = { fileName: string; text: string };
-type Analyzer = { analyzeDocument(text: string, fileName: string, resolveImport?: (specifier: string, containingFile: string) => ImportedSource | undefined): { routes: readonly RouteAnalysis[]; statusLiterals: readonly StatusLiteral[] } };
+type Analyzer = { analyzeDocument(text: string, fileName: string, resolveImport?: (specifier: string, containingFile: string) => ImportedSource | undefined): { routes: readonly RouteAnalysis[]; statusLiterals: readonly StatusLiteral[]; statusSuggestions: readonly { code: number; range: { start: number; end: number }; detail: string }[] } };
+type StatusSuggestionModule = { inferStatusFromContext(context: string): { code: number; detail: string } | undefined };
 
 function analyzer(): Analyzer {
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- Keep missing analyzer as the deliberate RED failure.
   return require("../../src/analyzer") as Analyzer;
+}
+
+function statusSuggestionModule(): StatusSuggestionModule {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Keep missing implementation as the deliberate RED failure.
+  return require("../../src/status-suggestions") as StatusSuggestionModule;
 }
 
 const routes = (text: string, fileName = "routes.ts"): readonly RouteAnalysis[] =>
@@ -120,6 +127,60 @@ app.get("/supported", (req, res) => {});`;
     assert.ok(route);
     assert.equal(source.slice(route.range.start, route.range.end), declaration);
     assert.deepEqual(route.statuses, []);
+  });
+});
+
+describe("cursor-aware status suggestions", () => {
+  it("suggestsNotFoundInsideControllerBranch", () => {
+    const source = `async function getUser(req, res) {
+  const userRecord = await users.findById(req.params.id);
+  if (!userRecord) return rs;
+}`;
+    const result = analyzer().analyzeDocument(source, "controller.ts");
+    const cursor = source.lastIndexOf("rs") + 2;
+    assert.equal(result.statusSuggestions.find(({ range }) => cursor >= range.start && cursor <= range.end)?.code, 404);
+  });
+
+  it("doesNotSuggestOutsideAnExpressStyleHandler", () => {
+    const source = `async function getUser() {
+  const userRecord = await users.findById(id);
+  if (!userRecord) return rs;
+}`;
+    assert.deepEqual(analyzer().analyzeDocument(source, "service.ts").statusSuggestions, []);
+  });
+
+  it("recognizesEveryRegisteredStatusPhrase", () => {
+    for (const status of getAllStatuses()) {
+      assert.equal(statusSuggestionModule().inferStatusFromContext(`throw new Error("${status.phrase}")`)?.code, status.code);
+    }
+  });
+
+  it("doesNotRankTiedErrorPhrases", () => {
+    assert.equal(statusSuggestionModule().inferStatusFromContext('throw new Error("Unauthorized or Forbidden")'), undefined);
+  });
+
+  it("doesNotRankGenericOrCrossTokenMatches", () => {
+    const { inferStatusFromContext } = statusSuggestionModule();
+    assert.equal(inferStatusFromContext("if (ok) return rs"), undefined);
+    assert.equal(inferStatusFromContext("if (not) return found"), undefined);
+  });
+
+  it("recognizesStatusPhrasesWithinIdentifiersAndStrings", () => {
+    const { inferStatusFromContext } = statusSuggestionModule();
+    assert.equal(inferStatusFromContext("if (resourceNotFound) return rs")?.code, 404);
+    assert.equal(inferStatusFromContext('throw new Error("OK")')?.code, 200);
+  });
+
+  it("usesOnlyTheCurrentBranchForRanking", () => {
+    const source = `function updateUser(req, res) {
+  if (isForbidden) return rs;
+  if (isNotFound) return rs;
+}`;
+    const result = analyzer().analyzeDocument(source, "controller.ts");
+    const forbiddenCursor = source.indexOf("return rs") + "return rs".length;
+    const missingCursor = source.lastIndexOf("return rs") + "return rs".length;
+    assert.equal(result.statusSuggestions.find(({ range }) => forbiddenCursor >= range.start && forbiddenCursor <= range.end)?.code, 403);
+    assert.equal(result.statusSuggestions.find(({ range }) => missingCursor >= range.start && missingCursor <= range.end)?.code, 404);
   });
 });
 

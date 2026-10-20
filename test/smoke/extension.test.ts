@@ -31,6 +31,52 @@ suite("extension host smoke", () => {
     assert.equal(completion.insertText?.toString(), "res.status(404)");
   });
 
+  test("ranksStatusForCurrentControllerBranch", async () => {
+    const fixture = path.resolve(__dirname, "../../../test/fixtures/workspace/controllers/user-controller.ts");
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
+    await vscode.window.showTextDocument(document);
+    const extension = vscode.extensions.getExtension("local.http-status-lens");
+    assert.ok(extension);
+    await extension.activate();
+
+    const shortcutOffset = document.getText().lastIndexOf("rs") + 2;
+    const position = document.positionAt(shortcutOffset);
+    const completions = await vscode.commands.executeCommand<vscode.CompletionList>("vscode.executeCompletionItemProvider", document.uri, position);
+    const statusItems = completions?.items.filter((item) => item.filterText?.startsWith("rs")) ?? [];
+    assert.equal(statusItems[0]?.filterText, "rs404");
+    const recommended = statusItems[0];
+    assert.ok(recommended?.detail?.includes("Suggested from a missing lookup result"));
+    assert.equal(recommended?.insertText?.toString(), "res.status(404)");
+    assert.ok(completions?.items.some((item) => item.filterText === "rs200"));
+
+    const sendStatusOffset = document.getText().lastIndexOf("rss") + "rss".length;
+    const sendStatusPosition = document.positionAt(sendStatusOffset);
+    const sendStatusCompletions = await vscode.commands.executeCommand<vscode.CompletionList>(
+      "vscode.executeCompletionItemProvider", document.uri, sendStatusPosition);
+    const sendStatusItems = sendStatusCompletions?.items.filter((item) => item.filterText?.startsWith("rss")) ?? [];
+    assert.equal(sendStatusItems[0]?.filterText, "rss404");
+    assert.equal(sendStatusItems[0]?.insertText?.toString(), "res.sendStatus(404)");
+  });
+
+  test("ranksStatusInLargeControllerFixture", async () => {
+    const fixture = path.resolve(__dirname, "../../../test/fixtures/workspace/large/large-controller.ts");
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
+    assert.ok(document.getText().length > 80_000, "fixture should exercise a large controller file");
+    await vscode.window.showTextDocument(document);
+    const extension = vscode.extensions.getExtension("local.http-status-lens");
+    assert.ok(extension);
+    await extension.activate();
+
+    const shortcutOffset = document.getText().indexOf("return rs;") + "return rs".length;
+    const position = document.positionAt(shortcutOffset);
+    const completions = await vscode.commands.executeCommand<vscode.CompletionList>(
+      "vscode.executeCompletionItemProvider", document.uri, position);
+    const statusItems = completions?.items.filter((item) => item.filterText?.startsWith("rs")) ?? [];
+    assert.equal(statusItems[0]?.filterText, "rs404");
+    assert.equal(statusItems[0]?.insertText?.toString(), "res.status(404)");
+    assert.ok(completions?.items.some((item) => item.filterText === "rs200"));
+  });
+
   test("resolves imported handlers and refreshes routes when a controller changes", async () => {
     const workspaceRoot = path.resolve(__dirname, "../../../test/fixtures/workspace/separated");
     const routeUri = vscode.Uri.file(path.join(workspaceRoot, "routes.js"));

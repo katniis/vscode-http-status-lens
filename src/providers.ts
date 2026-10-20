@@ -170,7 +170,7 @@ export function createRouteDecorations(cache: DocumentAnalysisCache, onError: (e
   });
 }
 
-export function createCompletionProvider(onError: (error: unknown) => void): vscode.CompletionItemProvider {
+export function createCompletionProvider(cache: DocumentAnalysisCache, onError: (error: unknown) => void): vscode.CompletionItemProvider {
   return {
     provideCompletionItems(document, position, token) {
       if (token.isCancellationRequested || !supported(document)) return [];
@@ -178,12 +178,15 @@ export function createCompletionProvider(onError: (error: unknown) => void): vsc
         const line = document.lineAt(position.line).text.slice(0, position.character);
         const match = matchCompletionPrefix(line);
         if (!match) return [];
+        const offset = document.offsetAt(position);
+        const suggestion = cache.get(document).statusSuggestions.find(({ range }) => offset >= range.start && offset <= range.end);
         const range = new vscode.Range(position.line, match.start, position.line, position.character);
-        return getCompletionCandidates(match.kind, match.query).map((candidate) => {
+        return getCompletionCandidates(match.kind, match.query, suggestion).map((candidate) => {
           const item = new vscode.CompletionItem(candidate.label, vscode.CompletionItemKind.Snippet);
           item.detail = candidate.detail;
           item.insertText = candidate.insertText;
           item.filterText = `${match.kind === "status" ? "rs" : "rss"}${candidate.code}`;
+          item.sortText = `${candidate.suggested ? "0" : "1"}${String(candidate.code).padStart(3, "0")}`;
           item.range = range;
           return item;
         });

@@ -1,5 +1,7 @@
 import ts from "typescript";
 import type { AnalysisResult, ImportedSource, ModuleResolver, RouteAnalysis, StatusFact, StatusLiteral } from "./model.js";
+import type { StatusSuggestion } from "./model.js";
+import { inferStatusFromContext } from "./status-suggestions.js";
 
 const routeMethods = new Set(["get", "post", "put", "patch", "delete", "options", "head", "all"]);
 
@@ -209,6 +211,89 @@ function responseCall(node: ts.CallExpression, response: string): string | undef
   return undefined;
 }
 
+const responseMethods = new Set(["status", "sendStatus", "send", "json", "jsonp", "end", "render", "sendFile", "download", "redirect"]);
+
+function hasResponseMethod(handler: Handler, response: string): boolean {
+  let found = false;
+  function visit(node: ts.Node): void {
+    if (found || (node !== handler.body && (ts.isFunctionLike(node) || ts.isClassLike(node)))) return;
+    if (ts.isCallExpression(node) && responseMethods.has(responseCall(node, response) ?? "")) found = true;
+    ts.forEachChild(node, visit);
+  }
+  visit(handler.body);
+  return found;
+}
+
+function missingValue(expression: ts.Expression): { name: string; missingInThen: boolean } | undefined {
+  if (ts.isPrefixUnaryExpression(expression) && expression.operator === ts.SyntaxKind.ExclamationToken && ts.isIdentifier(expression.operand)) {
+    return { name: expression.operand.text, missingInThen: true };
+  }
+  if (!ts.isBinaryExpression(expression) || ![ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(expression.operatorToken.kind)) return undefined;
+  const equals = expression.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken || expression.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken;
+  const pairs = [[expression.left, expression.right], [expression.right, expression.left]] as const;
+  for (const [value, empty] of pairs) {
+    if (!ts.isIdentifier(value)) continue;
+    if (empty.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(empty) && empty.text === "undefined")) return { name: value.text, missingInThen: equals };
+  }
+  return undefined;
+}
+
+function lookupInitializer(handler: Handler, name: string): string | undefined {
+  let initializer: ts.Expression | undefined;
+  function visit(node: ts.Node): void {
+    if (node !== handler.body && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name) initializer = node.initializer;
+    ts.forEachChild(node, visit);
+  }
+  visit(handler.body);
+  if (!initializer) return undefined;
+  let lookup: string | undefined;
+  function findCall(node: ts.Node): void {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && ["findById", "findOne", "findUnique", "findByPk", "findFirst"].includes(node.expression.name.text)) {
+      lookup = node.expression.name.text;
+    }
+    ts.forEachChild(node, findCall);
+  }
+  findCall(initializer);
+  return lookup;
+}
+
+function statusSuggestionsForHandler(handler: Handler, source: ts.SourceFile): StatusSuggestion[] {
+  const response = responseName(handler);
+  if (!response || !(new Set(["res", "response", "reply"]).has(response.toLowerCase()) || hasResponseMethod(handler, response))) return [];
+  const suggestions: StatusSuggestion[] = [];
+  function add(branch: ts.Node, context: string, missing?: { name: string; missing: boolean }): void {
+    const lookup = missing?.missing ? lookupInitializer(handler, missing.name) : undefined;
+    const inferred = lookup ? { code: 404, detail: "Suggested from a missing lookup result: 404 Not Found" } : inferStatusFromContext(context);
+    if (!inferred) return;
+    suggestions.push({ code: inferred.code, detail: inferred.detail, range: { start: branch.getStart(source), end: branch.end } });
+  }
+  function visit(node: ts.Node): void {
+    if (node !== handler.body && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
+    if (ts.isIfStatement(node)) {
+      const condition = missingValue(node.expression);
+      const thenMissing = condition ? condition.missingInThen : false;
+      const thenContext = `${node.expression.getText(source)} ${node.thenStatement.getText(source)}`;
+      add(node.thenStatement, thenContext, condition && { name: condition.name, missing: thenMissing });
+      if (node.elseStatement) {
+        const elseContext = `${node.expression.getText(source)} ${node.elseStatement.getText(source)}`;
+        add(node.elseStatement, elseContext, condition && { name: condition.name, missing: !thenMissing });
+      }
+    } else if (ts.isConditionalExpression(node)) {
+      const condition = missingValue(node.condition);
+      add(node.whenTrue, `${node.condition.getText(source)} ${node.whenTrue.getText(source)}`, condition && { name: condition.name, missing: condition.missingInThen });
+      add(node.whenFalse, `${node.condition.getText(source)} ${node.whenFalse.getText(source)}`, condition && { name: condition.name, missing: !condition.missingInThen });
+    } else if (ts.isCatchClause(node)) {
+      add(node.block, node.getText(source));
+    } else if (ts.isCaseClause(node) || ts.isDefaultClause(node)) {
+      add(node, node.getText(source));
+    }
+    ts.forEachChild(node, visit);
+  }
+  if (handler.body) visit(handler.body);
+  return suggestions;
+}
+
 function statusCallInChain(node: ts.CallExpression, response: string): boolean {
   if (!ts.isPropertyAccessExpression(node.expression)) return false;
   const receiver = node.expression.expression;
@@ -344,5 +429,7 @@ export function analyzeDocument(text: string, fileName: string, resolveImport?: 
     seenLiterals.add(key);
     return true;
   }).sort((left, right) => left.range.start - right.range.start);
-  return { routes, statusLiterals, dependencies: [...dependencies] };
+  const statusSuggestions = [...localHandlers].flatMap((handler) => statusSuggestionsForHandler(handler, source))
+    .sort((left, right) => (left.range.end - left.range.start) - (right.range.end - right.range.start));
+  return { routes, statusLiterals, dependencies: [...dependencies], statusSuggestions };
 }
