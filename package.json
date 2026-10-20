@@ -2,7 +2,7 @@
   "name": "http-status-lens",
   "displayName": "HTTP Status Lens",
   "description": "See possible Express and Fastify response statuses in your code.",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "publisher": "local",
   "license": "MIT",
   "repository": {
