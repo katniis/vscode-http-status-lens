@@ -1,5 +1,6 @@
 import { getAllStatuses } from "./statuses.js";
 import type { InferredStatus } from "./status-suggestions.js";
+import type { CompletionContext } from "./model.js";
 
 export interface CompletionCandidate {
   readonly code: number;
@@ -19,14 +20,16 @@ export function matchCompletionPrefix(linePrefix: string): { kind: "status" | "s
   };
 }
 
-export function getCompletionCandidates(kind: "status" | "sendStatus", query: string, suggestion?: InferredStatus): readonly CompletionCandidate[] {
+export function getCompletionCandidates(kind: "status" | "sendStatus", query: string, suggestion?: InferredStatus, context?: Pick<CompletionContext, "replyName" | "framework">): readonly CompletionCandidate[] {
   const candidates = getAllStatuses()
     .filter((status) => String(status.code).startsWith(query))
     .map((status) => ({
       code: status.code,
       label: `${status.code} ${status.phrase}`,
       detail: `${status.phrase} (${status.category})${status.code === suggestion?.code ? ` — ${suggestion.detail}` : ""}`,
-      insertText: `res.${kind === "status" ? "status" : "sendStatus"}(${status.code})`,
+      insertText: context?.framework === "fastify"
+        ? `${context.replyName}.code(${status.code})${kind === "sendStatus" ? ".send()" : ""}`
+        : `res.${kind === "status" ? "status" : "sendStatus"}(${status.code})`,
       suggested: status.code === suggestion?.code,
     }));
   return candidates.sort((left, right) => Number(right.suggested) - Number(left.suggested));
