@@ -1,8 +1,8 @@
 {
   "name": "http-status-lens",
   "displayName": "HTTP Status Lens",
-  "description": "See possible Express response statuses in your code.",
-  "version": "0.1.2",
+  "description": "See possible Express and Fastify response statuses in your code.",
+  "version": "0.2.0",
   "publisher": "local",
   "license": "MIT",
   "repository": {
@@ -32,7 +32,7 @@
         "httpStatusLens.showCodeLens": {
           "type": "boolean",
           "default": true,
-          "description": "Show possible response statuses above Express routes."
+          "description": "Show possible response statuses above Express and Fastify routes."
         }
       }
     }

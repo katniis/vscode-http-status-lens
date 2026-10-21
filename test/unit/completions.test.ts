@@ -3,9 +3,10 @@ import { describe, it } from "mocha";
 
 type Candidate = { code: number; label: string; detail: string; insertText: string; suggested?: boolean };
 type Suggestion = { code: number; detail: string };
+type CompletionContext = { replyName: string; framework: "express" | "fastify" };
 type Completions = {
   matchCompletionPrefix(linePrefix: string): { kind: "status" | "sendStatus"; query: string; start: number } | undefined;
-  getCompletionCandidates(kind: "status" | "sendStatus", query: string, suggestion?: Suggestion): readonly Candidate[];
+  getCompletionCandidates(kind: "status" | "sendStatus", query: string, suggestion?: Suggestion, context?: CompletionContext): readonly Candidate[];
 };
 
 function completions(): Completions {
@@ -50,6 +51,13 @@ describe("completions", () => {
     const { getCompletionCandidates } = completions();
     assert.equal(getCompletionCandidates("status", "404")[0]?.insertText, "res.status(404)");
     assert.equal(getCompletionCandidates("sendStatus", "404")[0]?.insertText, "res.sendStatus(404)");
+  });
+
+  it("usesFastifyReplyInsertionForStatusAndSendStatus", () => {
+    const candidates = completions().getCompletionCandidates("status", "404", undefined, { replyName: "reply", framework: "fastify" });
+    assert.equal(candidates[0]?.insertText, "reply.code(404)");
+    const sendCandidates = completions().getCompletionCandidates("sendStatus", "404", undefined, { replyName: "reply", framework: "fastify" });
+    assert.equal(sendCandidates[0]?.insertText, "reply.code(404).send()");
   });
 
   it("formatsCandidateDetailsWithoutCenterDots", () => {

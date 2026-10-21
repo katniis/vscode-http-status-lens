@@ -16,6 +16,8 @@ const packageMetadata = JSON.parse(await readFile(path.join(root, "package.json"
 const fixtures = [
   { name: "small-controller", file: "test/fixtures/workspace/controllers/user-controller.ts" },
   { name: "large-controller", file: "test/fixtures/workspace/large/large-controller.ts" },
+  { name: "fastify-small-plugin-graph", file: "test/fixtures/workspace/fastify/app.ts" },
+  { name: "fastify-large-plugin-graph", file: "test/fixtures/workspace/fastify/large-app.ts" },
 ];
 
 // Each fixture gets a fresh child process, making cold memory and first-analysis data comparable.
@@ -29,20 +31,29 @@ for (const fixture of fixtures) {
     const moduleLoadMs = performance.now() - importStarted;
     const afterImport = process.memoryUsage();
     const fs = require("node:fs");
+    const path = require("node:path");
+    const ts = require("typescript");
     const text = fs.readFileSync(${JSON.stringify(path.join(root, fixture.file))}, "utf8");
     const fileName = ${JSON.stringify(path.join(root, fixture.file))};
+    const resolver = (specifier, containingFile) => {
+      if (!specifier.startsWith(".")) return undefined;
+      const resolved = ts.resolveModuleName(specifier, containingFile, { allowJs: true, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext }, ts.sys).resolvedModule;
+      if (!resolved) return undefined;
+      const importedFile = path.resolve(resolved.resolvedFileName);
+      try { return { fileName: importedFile, text: fs.readFileSync(importedFile, "utf8") }; } catch { return undefined; }
+    };
     const beforeAnalysis = process.memoryUsage();
     const started = performance.now();
-    let latest = analyzeDocument(text, fileName);
+    let latest = analyzeDocument(text, fileName, resolver);
     const coldAnalysisMs = performance.now() - started;
     const warm = [];
-    for (let i = 0; i < 11; i++) { const t = performance.now(); latest = analyzeDocument(text, fileName); warm.push(performance.now() - t); }
+    for (let i = 0; i < 11; i++) { const t = performance.now(); latest = analyzeDocument(text, fileName, resolver); warm.push(performance.now() - t); }
     const suggestion = latest.statusSuggestions.find(({code}) => code === 404);
     const status = [], sendStatus = [];
     for (let i = 0; i < 11; i++) { let t = performance.now(); getCompletionCandidates("status", "", suggestion); status.push(performance.now() - t); t = performance.now(); getCompletionCandidates("sendStatus", "", suggestion); sendStatus.push(performance.now() - t); }
     const median = values => { const sorted = values.slice(1).sort((a,b) => a-b); return sorted[Math.floor(sorted.length / 2)]; };
     if (global.gc) global.gc();
-    process.stdout.write(JSON.stringify({ fixtureBytes: Buffer.byteLength(text), moduleLoadMs, coldAnalysisMs, warmAnalysisMedianMs: median(warm), warmAnalysisSamplesMs: warm.slice(1), completionStatusMedianMs: median(status), completionSendStatusMedianMs: median(sendStatus), analysisCounts: { routes: latest.routes.length, statusLiterals: latest.statusLiterals.length, suggestions: latest.statusSuggestions.length }, inferred404: latest.statusSuggestions.some(({code}) => code === 404), memory: { beforeImport, afterImport, beforeAnalysis, after: process.memoryUsage() } }));
+    process.stdout.write(JSON.stringify({ fixtureBytes: Buffer.byteLength(text), moduleLoadMs, coldAnalysisMs, warmAnalysisMedianMs: median(warm), warmAnalysisSamplesMs: warm.slice(1), completionStatusMedianMs: median(status), completionSendStatusMedianMs: median(sendStatus), analysisCounts: { routes: latest.routes.length, statusLiterals: latest.statusLiterals.length, suggestions: latest.statusSuggestions.length }, inferred404: latest.routes.some(({statuses}) => statuses.some(({code}) => code === 404)), localSuggestion404: latest.statusSuggestions.some(({code}) => code === 404), memory: { beforeImport, afterImport, beforeAnalysis, after: process.memoryUsage() } }));
   `;
   const child = spawnSync(process.execPath, ["--expose-gc", "-e", runner], { cwd: root, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
   if (child.status !== 0) throw new Error(`Analyzer benchmark failed for ${fixture.name}: ${child.stderr}`);

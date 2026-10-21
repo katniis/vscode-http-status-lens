@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { expressDocumentAnalyzer } from "./analyzer.js";
+import { javascriptDocumentAnalyzer } from "./analyzer.js";
 import { getCompletionCandidates, matchCompletionPrefix } from "./completions.js";
 import type { AnalysisResult, DocumentAnalyzer, ModuleResolver } from "./model.js";
 import { formatRouteTitle, formatStatusHover } from "./presentation.js";
@@ -13,7 +13,7 @@ export class DocumentAnalysisCache {
   private readonly dependenciesByDocument = new Map<string, Set<string>>();
   private readonly dependentsByDependency = new Map<string, Set<string>>();
 
-  constructor(private readonly analyzer: DocumentAnalyzer = expressDocumentAnalyzer) {}
+  constructor(private readonly analyzer: DocumentAnalyzer = javascriptDocumentAnalyzer) {}
 
   get(document: vscode.TextDocument): AnalysisResult {
     const key = document.uri.toString();
@@ -57,6 +57,12 @@ export class DocumentAnalysisCache {
 function createModuleResolver(document: vscode.TextDocument): ModuleResolver | undefined {
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
   if (!workspaceFolder) return undefined;
+  let workspaceRoot: string;
+  try {
+    workspaceRoot = realpathSync(workspaceFolder.uri.fsPath);
+  } catch {
+    return undefined;
+  }
   const compilerOptions: ts.CompilerOptions = {
     allowJs: true,
     module: ts.ModuleKind.NodeNext,
@@ -66,8 +72,13 @@ function createModuleResolver(document: vscode.TextDocument): ModuleResolver | u
     if (!specifier.startsWith(".")) return undefined;
     const resolved = ts.resolveModuleName(specifier, containingFile, compilerOptions, ts.sys).resolvedModule;
     if (!resolved) return undefined;
-    const fileName = path.resolve(resolved.resolvedFileName);
-    const relative = path.relative(workspaceFolder.uri.fsPath, fileName);
+    let fileName: string;
+    try {
+      fileName = realpathSync(path.resolve(resolved.resolvedFileName));
+    } catch {
+      return undefined;
+    }
+    const relative = path.relative(workspaceRoot, fileName);
     if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined;
     const uri = vscode.Uri.file(fileName);
     const openDocument = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === uri.toString());
@@ -189,9 +200,11 @@ export function createCompletionProvider(cache: DocumentAnalysisCache, onError: 
         const match = matchCompletionPrefix(line);
         if (!match) return [];
         const offset = document.offsetAt(position);
-        const suggestion = cache.get(document).statusSuggestions.find(({ range }) => offset >= range.start && offset <= range.end);
+        const analysis = cache.get(document);
+        const suggestion = analysis.statusSuggestions.find(({ range }) => offset >= range.start && offset <= range.end);
+        const completionContext = analysis.completionContexts.find(({ range }) => offset >= range.start && offset <= range.end);
         const range = new vscode.Range(position.line, match.start, position.line, position.character);
-        return getCompletionCandidates(match.kind, match.query, suggestion).map((candidate) => {
+        return getCompletionCandidates(match.kind, match.query, suggestion, completionContext).map((candidate) => {
           const item = new vscode.CompletionItem(candidate.label, vscode.CompletionItemKind.Snippet);
           item.detail = candidate.detail;
           item.insertText = candidate.insertText;

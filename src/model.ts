@@ -32,6 +32,13 @@ export interface AnalysisResult {
   readonly statusLiterals: readonly StatusLiteral[];
   readonly dependencies: readonly string[];
   readonly statusSuggestions: readonly StatusSuggestion[];
+  readonly completionContexts: readonly CompletionContext[];
+}
+
+export interface CompletionContext {
+  readonly range: SourceRange;
+  readonly replyName: string;
+  readonly framework: "express" | "fastify";
 }
 
 /** Immutable source data consumed by the active document analyzer. */

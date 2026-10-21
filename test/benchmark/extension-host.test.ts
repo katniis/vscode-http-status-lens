@@ -56,6 +56,34 @@ suite("opt-in extension host benchmark", () => {
     assert.equal(lensesAfterEdits?.length, 500);
     const afterEditBurst = memory();
 
+    const fastifyFile = path.resolve(__dirname, "../../../test/fixtures/workspace/fastify/large-app.ts");
+    const fastifyDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(fastifyFile));
+    await vscode.window.showTextDocument(fastifyDocument);
+    const fastifyOpenMemory = memory();
+    const fastifyAnalysisStart = performance.now();
+    const fastifyLenses = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", fastifyDocument.uri);
+    const fastifyAnalysisMs = performance.now() - fastifyAnalysisStart;
+    assert.equal(fastifyLenses?.length, 250);
+    const afterFastifyAnalysis = memory();
+    const fastifyPluginFile = path.resolve(__dirname, "../../../test/fixtures/workspace/fastify/plugins/large.ts");
+    const fastifyPlugin = await vscode.workspace.openTextDocument(vscode.Uri.file(fastifyPluginFile));
+    await vscode.window.showTextDocument(fastifyPlugin);
+    const fastifySource = fastifyPlugin.getText();
+    const fastifyOffset = fastifySource.indexOf("const status = rs;") + "const status = rs".length;
+    const fastifyPosition = fastifyPlugin.positionAt(fastifyOffset);
+    const fastifyCompletionSamplesMs: number[] = [];
+    for (let index = 0; index < 11; index++) {
+      const completionStart = performance.now();
+      const completions = await vscode.commands.executeCommand<vscode.CompletionList>(
+        "vscode.executeCompletionItemProvider", fastifyPlugin.uri, fastifyPosition);
+      fastifyCompletionSamplesMs.push(performance.now() - completionStart);
+      const statusItems = completions?.items.filter(({ filterText }) => filterText?.startsWith("rs")) ?? [];
+      assert.equal(statusItems[0]?.filterText, "rs404");
+      assert.ok(statusItems.some(({ filterText }) => filterText === "rs200"));
+    }
+    const fastifySorted = fastifyCompletionSamplesMs.slice(1).sort((left, right) => left - right);
+    const fastifyCompletionMs = fastifySorted[Math.floor(fastifySorted.length / 2)] ?? 0;
+
     const outputDirectory = path.resolve(__dirname, "../../../benchmark-output");
     await mkdir(outputDirectory, { recursive: true });
     await writeFile(path.join(outputDirectory, "extension-host.json"), JSON.stringify({
@@ -68,6 +96,16 @@ suite("opt-in extension host benchmark", () => {
       analysisMs,
       editBurst: { changes: 5, editApplyMs, editSettledMs },
       snapshots: { beforeActivation, afterActivation, afterDocumentOpen, afterAnalysis, afterEditBurst },
+      fastify: {
+        fixtureBytes: Buffer.byteLength(fastifySource),
+        appFixtureBytes: Buffer.byteLength(fastifyDocument.getText()),
+        routes: fastifyLenses?.length ?? 0,
+        analysisMs: fastifyAnalysisMs,
+        completionMs: fastifyCompletionMs,
+        completionColdMs: fastifyCompletionSamplesMs[0],
+        completionSamplesMs: fastifyCompletionSamplesMs.slice(1),
+        snapshots: { afterOpen: fastifyOpenMemory, afterAnalysis: afterFastifyAnalysis, afterCompletions: memory() },
+      },
     }, null, 2));
   });
 });
