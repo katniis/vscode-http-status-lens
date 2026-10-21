@@ -1,6 +1,6 @@
 import { getAllStatuses } from "./statuses.js";
 import type { InferredStatus } from "./status-suggestions.js";
-import type { CompletionContext } from "./model.js";
+import type { CompletionContext, CompletionKind } from "./model.js";
 
 export interface CompletionCandidate {
   readonly code: number;
@@ -20,15 +20,14 @@ export function matchCompletionPrefix(linePrefix: string): { kind: "status" | "s
   };
 }
 
-export function getCompletionCandidates(kind: "status" | "sendStatus", query: string, suggestion?: InferredStatus, context?: Pick<CompletionContext, "replyName" | "framework">): readonly CompletionCandidate[] {
+export function getCompletionCandidates(kind: CompletionKind, query: string, suggestion?: InferredStatus, context?: CompletionContext, insertText?: (kind: CompletionKind, code: number, context: CompletionContext) => string): readonly CompletionCandidate[] {
   const candidates = getAllStatuses()
     .filter((status) => String(status.code).startsWith(query))
     .map((status) => ({
       code: status.code,
       label: `${status.code} ${status.phrase}`,
       detail: `${status.phrase} (${status.category})${status.code === suggestion?.code ? ` — ${suggestion.detail}` : ""}`,
-      insertText: context?.framework === "fastify"
-        ? `${context.replyName}.code(${status.code})${kind === "sendStatus" ? ".send()" : ""}`
+      insertText: context && insertText ? insertText(kind, status.code, context)
         : `res.${kind === "status" ? "status" : "sendStatus"}(${status.code})`,
       suggested: status.code === suggestion?.code,
     }));

@@ -52,6 +52,41 @@ suite("extension host smoke", () => {
     assert.equal(completion.insertText?.toString(), "res.status(404)");
   });
 
+  test("providesLaravelPhpRoutesHoversAndCompletions", async () => {
+    const fixture = path.resolve(__dirname, "../../../test/fixtures/workspace/laravel/smoke.php");
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));
+    await vscode.window.showTextDocument(document);
+    const extension = vscode.extensions.getExtension("local.http-status-lens");
+    assert.ok(extension);
+    await extension.activate();
+
+    const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", document.uri);
+    assert.deepEqual(lenses?.map((lens) => lens.command?.title), [
+      "GET /smoke → 200 OK (implicit) | 404 Not Found",
+      "POST /accepted → 202 Accepted",
+      "GET /bare-completion → No direct status detected",
+      "GET /controller/{id} → 200 OK (implicit) | 404 Not Found",
+    ]);
+
+    const source = document.getText();
+    const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+      "vscode.executeHoverProvider", document.uri, document.positionAt(source.indexOf("404")));
+    assert.match(hovers?.[0]?.contents.map((item) => typeof item === "string" ? item : item.value).join("\n") ?? "", /^404 Not Found/);
+
+    const cursor = source.indexOf("rs;") + 2;
+    const completions = await vscode.commands.executeCommand<vscode.CompletionList>(
+      "vscode.executeCompletionItemProvider", document.uri, document.positionAt(cursor));
+    const notFound = completions?.items.find(({ filterText }) => filterText === "rs404");
+    assert.equal(notFound?.insertText?.toString(), "response()->json([], 404)");
+    assert.ok(completions?.items.some(({ filterText }) => filterText === "rs201"));
+
+    const bareCursor = source.lastIndexOf("rs;") + 2;
+    const bareCompletions = await vscode.commands.executeCommand<vscode.CompletionList>(
+      "vscode.executeCompletionItemProvider", document.uri, document.positionAt(bareCursor));
+    const bareNotFound = bareCompletions?.items.find(({ filterText }) => filterText === "rs404");
+    assert.equal(bareNotFound?.insertText?.toString(), "return response()->json([], 404)");
+  });
+
   test("ranksStatusForCurrentControllerBranch", async () => {
     const fixture = path.resolve(__dirname, "../../../test/fixtures/workspace/controllers/user-controller.ts");
     const document = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture));

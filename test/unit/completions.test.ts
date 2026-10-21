@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
+import { documentAnalyzer } from "../../src/analyzer.js";
 import { describe, it } from "mocha";
 
 type Candidate = { code: number; label: string; detail: string; insertText: string; suggested?: boolean };
 type Suggestion = { code: number; detail: string };
-type CompletionContext = { replyName: string; framework: "express" | "fastify" };
+type CompletionContext = { range: { start: number; end: number }; replyName: string; framework: "express" | "fastify" | "laravel"; language?: "javascript" | "php"; returning?: boolean; statementPosition?: boolean };
 type Completions = {
   matchCompletionPrefix(linePrefix: string): { kind: "status" | "sendStatus"; query: string; start: number } | undefined;
-  getCompletionCandidates(kind: "status" | "sendStatus", query: string, suggestion?: Suggestion, context?: CompletionContext): readonly Candidate[];
+  getCompletionCandidates(kind: "status" | "sendStatus", query: string, suggestion?: Suggestion, context?: CompletionContext, insertText?: (kind: "status" | "sendStatus", code: number, context: CompletionContext) => string): readonly Candidate[];
 };
 
 function completions(): Completions {
@@ -54,10 +55,29 @@ describe("completions", () => {
   });
 
   it("usesFastifyReplyInsertionForStatusAndSendStatus", () => {
-    const candidates = completions().getCompletionCandidates("status", "404", undefined, { replyName: "reply", framework: "fastify" });
+    const context = { range: { start: 0, end: 1 }, replyName: "reply", framework: "fastify" as const };
+    const candidates = completions().getCompletionCandidates("status", "404", undefined, context, documentAnalyzer.insertCompletion);
     assert.equal(candidates[0]?.insertText, "reply.code(404)");
-    const sendCandidates = completions().getCompletionCandidates("sendStatus", "404", undefined, { replyName: "reply", framework: "fastify" });
+    const sendCandidates = completions().getCompletionCandidates("sendStatus", "404", undefined, context, documentAnalyzer.insertCompletion);
     assert.equal(sendCandidates[0]?.insertText, "reply.code(404).send()");
+  });
+
+  it("usesLaravelResponseHelpersForStatusAndSendStatus", () => {
+    const context = { range: { start: 0, end: 1 }, replyName: "", framework: "laravel" as const, language: "php" as const, statementPosition: true };
+    const { getCompletionCandidates } = completions();
+    assert.equal(getCompletionCandidates("status", "404", undefined, context, documentAnalyzer.insertCompletion)[0]?.insertText, "return response()->json([], 404)");
+    assert.equal(getCompletionCandidates("sendStatus", "404", undefined, context, documentAnalyzer.insertCompletion)[0]?.insertText, "return response()->noContent(404)");
+    const responseContext = { ...context, replyName: "response", returning: true, statementPosition: false };
+    assert.equal(getCompletionCandidates("status", "404", undefined, responseContext, documentAnalyzer.insertCompletion)[0]?.insertText, "$response->setStatusCode(404)");
+    assert.equal(getCompletionCandidates("sendStatus", "404", undefined, responseContext, documentAnalyzer.insertCompletion)[0]?.insertText, "$response->setStatusCode(404)->send()");
+    const returnStatement = completions().getCompletionCandidates("status", "404", undefined, { ...context, statementPosition: false, returning: true }, documentAnalyzer.insertCompletion);
+    assert.equal(returnStatement[0]?.insertText, "response()->json([], 404)");
+  });
+
+  it("uses PHP tokens to identify a return expression across lines", () => {
+    const context = { range: { start: 0, end: 1 }, replyName: "", framework: "laravel" as const, language: "php" as const };
+    assert.deepEqual(documentAnalyzer.completionPosition?.("return\n    /* cursor */", context), { returning: true, statementPosition: false });
+    assert.deepEqual(documentAnalyzer.completionPosition?.("$value = 1;\n    ", context), { returning: false, statementPosition: true });
   });
 
   it("formatsCandidateDetailsWithoutCenterDots", () => {

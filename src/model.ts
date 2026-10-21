@@ -38,7 +38,17 @@ export interface AnalysisResult {
 export interface CompletionContext {
   readonly range: SourceRange;
   readonly replyName: string;
-  readonly framework: "express" | "fastify";
+  readonly framework: "express" | "fastify" | "laravel";
+  readonly language?: "javascript" | "php";
+  readonly returning?: boolean;
+  readonly statementPosition?: boolean;
+}
+
+export type CompletionKind = "status" | "sendStatus";
+
+export interface CompletionPosition {
+  readonly returning: boolean;
+  readonly statementPosition: boolean;
 }
 
 /** Immutable source data consumed by the active document analyzer. */
@@ -50,6 +60,8 @@ export interface DocumentSnapshot {
 /** Internal seam for producing the normalized result shared by providers. */
 export interface DocumentAnalyzer {
   analyze(snapshot: DocumentSnapshot, resolveImport?: ModuleResolver): AnalysisResult;
+  insertCompletion?(kind: CompletionKind, code: number, context: CompletionContext): string;
+  completionPosition?(prefix: string, context: CompletionContext): CompletionPosition;
 }
 
 export interface StatusSuggestion {
