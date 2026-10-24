@@ -18,7 +18,8 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "onLanguage:javascript",
-    "onLanguage:typescript"
+    "onLanguage:typescript",
+    "onLanguage:python"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -32,7 +33,7 @@
         "httpStatusLens.showCodeLens": {
           "type": "boolean",
           "default": true,
-          "description": "Show possible response statuses above Express and Fastify routes."
+          "description": "Show possible response statuses above supported framework routes."
         }
       }
     }

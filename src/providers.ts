@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { javascriptDocumentAnalyzer } from "./analyzer.js";
+import { documentAnalyzer } from "./analyzer.js";
 import { getCompletionCandidates, matchCompletionPrefix } from "./completions.js";
 import type { AnalysisResult, DocumentAnalyzer, ModuleResolver } from "./model.js";
+import { isPythonReturnExpression } from "./python/parser.js";
 import { formatRouteTitle, formatStatusHover } from "./presentation.js";
 import { getStatus } from "./statuses.js";
 
@@ -13,7 +14,7 @@ export class DocumentAnalysisCache {
   private readonly dependenciesByDocument = new Map<string, Set<string>>();
   private readonly dependentsByDependency = new Map<string, Set<string>>();
 
-  constructor(private readonly analyzer: DocumentAnalyzer = javascriptDocumentAnalyzer) {}
+  constructor(private readonly analyzer: DocumentAnalyzer = documentAnalyzer) {}
 
   get(document: vscode.TextDocument): AnalysisResult {
     const key = document.uri.toString();
@@ -70,11 +71,21 @@ function createModuleResolver(document: vscode.TextDocument): ModuleResolver | u
   };
   return (specifier, containingFile) => {
     if (!specifier.startsWith(".")) return undefined;
-    const resolved = ts.resolveModuleName(specifier, containingFile, compilerOptions, ts.sys).resolvedModule;
-    if (!resolved) return undefined;
-    let fileName: string;
+    let fileName: string | undefined;
+    if (/\.pyi?$/i.test(containingFile)) {
+      const parentCount = specifier.match(/^\.+/)?.[0].length ?? 1;
+      const modulePath = specifier.slice(parentCount).replace(/\./g, path.sep);
+      const base = path.resolve(path.dirname(containingFile), ...Array(Math.max(0, parentCount - 1)).fill(".."), modulePath);
+      fileName = [`${base}.py`, path.join(base, "__init__.py")].find((candidate) => {
+        try { return statSync(candidate).isFile(); } catch { return false; }
+      });
+    } else {
+      const resolved = ts.resolveModuleName(specifier, containingFile, compilerOptions, ts.sys).resolvedModule;
+      fileName = resolved?.resolvedFileName;
+    }
+    if (!fileName) return undefined;
     try {
-      fileName = realpathSync(path.resolve(resolved.resolvedFileName));
+      fileName = realpathSync(fileName);
     } catch {
       return undefined;
     }
@@ -91,7 +102,7 @@ function createModuleResolver(document: vscode.TextDocument): ModuleResolver | u
 }
 
 function supported(document: vscode.TextDocument): boolean {
-  return document.uri.scheme === "file" && ["javascript", "typescript"].includes(document.languageId);
+  return document.uri.scheme === "file" && (["javascript", "typescript"].includes(document.languageId) || /\.pyi?$/i.test(document.fileName));
 }
 
 type RefreshableCodeLensProvider = vscode.CodeLensProvider & {
@@ -203,8 +214,11 @@ export function createCompletionProvider(cache: DocumentAnalysisCache, onError: 
         const analysis = cache.get(document);
         const suggestion = analysis.statusSuggestions.find(({ range }) => offset >= range.start && offset <= range.end);
         const completionContext = analysis.completionContexts.find(({ range }) => offset >= range.start && offset <= range.end);
+        const insertionContext = completionContext?.framework === "fastapi"
+          ? { ...completionContext, expression: /^\s*(?:return|yield)\s+(?:\([^)]*)?(?:rss|rs)\d*$/.test(line) || isPythonReturnExpression(document.getText().slice(completionContext.range.start, offset)) }
+          : completionContext;
         const range = new vscode.Range(position.line, match.start, position.line, position.character);
-        return getCompletionCandidates(match.kind, match.query, suggestion, completionContext).map((candidate) => {
+        return getCompletionCandidates(match.kind, match.query, suggestion, insertionContext).map((candidate) => {
           const item = new vscode.CompletionItem(candidate.label, vscode.CompletionItemKind.Snippet);
           item.detail = candidate.detail;
           item.insertText = candidate.insertText;

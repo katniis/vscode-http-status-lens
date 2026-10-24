@@ -38,7 +38,8 @@ export interface AnalysisResult {
 export interface CompletionContext {
   readonly range: SourceRange;
   readonly replyName: string;
-  readonly framework: "express" | "fastify";
+  readonly framework: "express" | "fastify" | "fastapi";
+  readonly expression?: boolean;
 }
 
 /** Immutable source data consumed by the active document analyzer. */
