@@ -38,10 +38,11 @@ export interface AnalysisResult {
 export interface CompletionContext {
   readonly range: SourceRange;
   readonly replyName: string;
-  readonly framework: "express" | "fastify" | "laravel";
-  readonly language?: "javascript" | "php";
+  readonly framework: "express" | "fastify" | "laravel" | "fastapi";
+  readonly language?: "javascript" | "php" | "python";
   readonly returning?: boolean;
   readonly statementPosition?: boolean;
+  readonly expression?: boolean;
 }
 
 export type CompletionKind = "status" | "sendStatus";

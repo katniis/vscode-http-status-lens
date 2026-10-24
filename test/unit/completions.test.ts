@@ -4,7 +4,15 @@ import { describe, it } from "mocha";
 
 type Candidate = { code: number; label: string; detail: string; insertText: string; suggested?: boolean };
 type Suggestion = { code: number; detail: string };
-type CompletionContext = { range: { start: number; end: number }; replyName: string; framework: "express" | "fastify" | "laravel"; language?: "javascript" | "php"; returning?: boolean; statementPosition?: boolean };
+type CompletionContext = {
+  range: { start: number; end: number };
+  replyName: string;
+  framework: "express" | "fastify" | "laravel" | "fastapi";
+  language?: "javascript" | "php" | "python";
+  returning?: boolean;
+  statementPosition?: boolean;
+  expression?: boolean;
+};
 type Completions = {
   matchCompletionPrefix(linePrefix: string): { kind: "status" | "sendStatus"; query: string; start: number } | undefined;
   getCompletionCandidates(kind: "status" | "sendStatus", query: string, suggestion?: Suggestion, context?: CompletionContext, insertText?: (kind: "status" | "sendStatus", code: number, context: CompletionContext) => string): readonly Candidate[];
@@ -78,6 +86,15 @@ describe("completions", () => {
     const context = { range: { start: 0, end: 1 }, replyName: "", framework: "laravel" as const, language: "php" as const };
     assert.deepEqual(documentAnalyzer.completionPosition?.("return\n    /* cursor */", context), { returning: true, statementPosition: false });
     assert.deepEqual(documentAnalyzer.completionPosition?.("$value = 1;\n    ", context), { returning: false, statementPosition: true });
+  });
+
+  it("usesFastAPIResponseAssignmentsAndExpressionSafeInsertion", () => {
+    for (const kind of ["status", "sendStatus"] as const) {
+      const item = completions().getCompletionCandidates(kind, "404", undefined, { range: { start: 0, end: 1 }, replyName: "response", framework: "fastapi" })[0];
+      assert.equal(item?.insertText, "response.status_code = 404");
+      const expression = completions().getCompletionCandidates(kind, "404", undefined, { range: { start: 0, end: 1 }, replyName: "response", framework: "fastapi", expression: true })[0];
+      assert.equal(expression?.insertText, 'setattr(response, "status_code", 404) or response');
+    }
   });
 
   it("formatsCandidateDetailsWithoutCenterDots", () => {

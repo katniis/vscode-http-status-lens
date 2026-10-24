@@ -35,6 +35,225 @@ function analyzeSeparatedRoutes() {
 }
 
 describe("route discovery", () => {
+  it("dispatchesPythonFastAPIEndpointsToThePythonAnalyzer", () => {
+    const source = `from fastapi import FastAPI\napp = FastAPI()\n@app.get("/items")\ndef list_items():\n    return {"items": []}\n`;
+    const result = analyzer().analyzeDocument(source, "routes.py");
+    assert.deepEqual(result.routes.map(({ method, path, statuses }) => [method, path, statuses.map(({ kind, code }) => [kind, code])]), [
+      ["GET", "/items", [["implicit", 200]]],
+    ]);
+  });
+
+  it("recognizesAnnotatedFastAPIApplicationBindings", () => {
+    const source = `from fastapi import FastAPI
+app: FastAPI = FastAPI()
+@app.get("/items")
+def list_items():
+    return {}`;
+    assert.deepEqual(analyzer().analyzeDocument(source, "routes.py").routes.map(({ path }) => path), ["/items"]);
+  });
+
+  it("usesFastAPIRouterPrefixAndHandlerResponseParameter", () => {
+    const source = `from fastapi import APIRouter, Response\nrouter = APIRouter(prefix="/v1")\n@router.post("/items")\ndef create_item(response: Response):\n    response.status_code = 201\n    return {"ok": True}\n`;
+    const result = analyzer().analyzeDocument(source, "routes.py");
+    assert.deepEqual(result.routes.map(({ method, path, statuses }) => [method, path, statuses.map(({ kind, code }) => [kind, code])]), [
+      ["POST", "/v1/items", [["explicit", 201]]],
+    ]);
+    const cursor = source.indexOf("return") + 6;
+    assert.equal(result.completionContexts.find(({ range }) => cursor >= range.start && cursor <= range.end)?.replyName, "response");
+    assert.equal(result.completionContexts.find(({ range }) => cursor >= range.start && cursor <= range.end)?.framework, "fastapi");
+  });
+
+  it("findsFastAPIStatusesAndKeepsNestedHelperBoundaries", () => {
+    const source = `from fastapi import FastAPI, HTTPException, Response\napp = FastAPI()\n@app.get("/items/{item_id}")\ndef get_item(item_id: int, res: Response):\n    if item_id is None:\n        raise HTTPException(status_code=404, detail="not found")\n    def helper():\n        raise HTTPException(status_code=500)\n    res.status_code = 202\n    return {"id": item_id}\n`;
+    const result = analyzer().analyzeDocument(source, "routes.py");
+    assert.deepEqual(result.routes.map(({ statuses }) => statuses.map(({ kind, code }) => [kind, code])), [[['explicit', 202], ['explicit', 404]]]);
+    assert.deepEqual(result.statusLiterals.map(({ code, range }) => [code, source.slice(range.start, range.end)]), [[404, "404"], [202, "202"]]);
+  });
+
+  it("includesConfiguredFastAPIStatusCodesInTheRouteSummary", () => {
+    const source = `from fastapi import FastAPI\napp = FastAPI()\n@app.post("/items", status_code=201)\ndef create_item():\n    return {}\n`;
+    const result = analyzer().analyzeDocument(source, "routes.py");
+    assert.deepEqual(result.routes[0]?.statuses, [{ kind: "explicit", code: 201 }]);
+    assert.deepEqual(result.statusLiterals.map(({ code }) => code), [201]);
+  });
+
+  it("usesResponseAnnotationForNonstandardCompletionParameterNames", () => {
+    const source = `from fastapi import FastAPI, Response\napp = FastAPI()\n@app.get("/items")\ndef items(req, out: Response):\n    return rs\n`;
+    const result = analyzer().analyzeDocument(source, "routes.py");
+    assert.equal(result.completionContexts[0]?.replyName, "out");
+    assert.deepEqual(result.routes.map(({ statuses }) => statuses.map(({ kind, code }) => [kind, code])), [[['implicit', 200]]]);
+  });
+
+  it("ranksFastAPIMissingBranchAndLeavesAmbiguousCuesUnranked", () => {
+    const source = `from fastapi import FastAPI, Response\napp = FastAPI()\n@app.get("/users")\ndef users(response: Response):\n    if user is None:\n        return rs\n    if bad:\n        return "bad request; not found"\n    return {}\n`;
+    const result = analyzer().analyzeDocument(source, "routes.py");
+    assert.deepEqual(result.statusSuggestions.map(({ code }) => code), [404]);
+    const cursor = source.indexOf("return rs") + "return rs".length;
+    assert.equal(result.statusSuggestions.find(({ range }) => cursor >= range.start && cursor <= range.end)?.code, 404);
+  });
+
+  it("resolvesLocalRouterModulesAndAppliesGroupPrefixesWithoutFollowingCycles", () => {
+    const fileName = path.resolve("workspace/app.py");
+    const routerName = path.resolve("workspace/routes.py");
+    const nestedName = path.resolve("workspace/nested.py");
+    const routeSource = `from fastapi import APIRouter\nfrom .nested import router_b\nrouter = APIRouter(prefix="/items")\n@router.get("/")\ndef list_items():\n    return []\nrouter.include_router(router_b)\n`;
+    const nestedSource = `from fastapi import APIRouter\nfrom .routes import router\nrouter_b = APIRouter(prefix="/nested")\n@router_b.get("/child")\ndef child():\n    return {}\nrouter_b.include_router(router)\n`;
+    const source = `from fastapi import FastAPI\nfrom .routes import router\napp = FastAPI()\napp.include_router(router, prefix="/v1")\n`;
+    const modules = new Map([[".routes", { fileName: routerName, text: routeSource }], [".nested", { fileName: nestedName, text: nestedSource }]]);
+    const result = analyzer().analyzeDocument(source, fileName, (specifier) => modules.get(specifier));
+    assert.deepEqual(result.routes.map(({ method, path, statuses }) => [method, path, statuses.map(({ code }) => code)]), [
+      ["GET", "/v1/items/", [200]], ["GET", "/v1/items/nested/child", [200]],
+    ]);
+    assert.deepEqual(result.dependencies, [routerName, nestedName]);
+  });
+
+  it("analyzesHundredsOfFastAPIRoutesFromARealisticFixture", () => {
+    const fileName = path.resolve(__dirname, "../../../test/fixtures/workspace/fastapi/large_app.py");
+    const result = analyzer().analyzeDocument(readFileSync(fileName, "utf8"), fileName);
+    assert.equal(result.routes.length, 250);
+    assert.equal(result.routes[0]?.path, "/v1/items/0");
+    assert.equal(result.routes.at(-1)?.path, "/v1/items/249");
+  });
+
+  it("findsFastAPIControllerStatusesWithoutRouteDecorators", () => {
+    const source = `from fastapi import HTTPException, Response\ndef read_item(out: Response):\n    out.status_code = 404\n    return {}\n`;
+    const result = analyzer().analyzeDocument(source, "controller.py");
+    assert.deepEqual(result.statusLiterals.map(({ code, range }) => [code, source.slice(range.start, range.end)]), [[404, "404"]]);
+    assert.deepEqual(result.completionContexts, []);
+  });
+
+  it("ignoresFakeDecoratorsInDocstringsAndDynamicRoutes", () => {
+    const source = `from fastapi import FastAPI\napp = FastAPI()\n'''\n@app.get("/fake")\ndef fake():\n    return {}\n'''\n# @app.get("/comment")\n@app.get(path_name)\ndef dynamic():\n    return {}\n`;
+    const result = analyzer().analyzeDocument(source, "routes.py");
+    assert.deepEqual(result.routes.map(({ path }) => path), ["<dynamic path>"]);
+  });
+
+  it("requiresFastAPIImportsBeforeRecognizingItsConstructors", () => {
+    const source = `from fake_framework import FastAPI, APIRouter
+app = FastAPI()
+router = APIRouter()
+@app.get("/fake")
+def fake_app():
+    return {}
+@router.get("/fake-router")
+def fake_router():
+    return {}`;
+    const unimportedModule = `app = fastapi.FastAPI()
+@app.get("/fake")
+def fake_app():
+    return {}`;
+    assert.deepEqual(analyzer().analyzeDocument(source, "routes.py").routes, []);
+    assert.deepEqual(analyzer().analyzeDocument(unimportedModule, "routes.py").routes, []);
+  });
+
+  it("doesNotKeepFastAPIConstructorBindingsAfterModuleLevelShadowing", () => {
+    const reassigned = `from fastapi import FastAPI
+FastAPI = fake
+app = FastAPI()
+@app.get("/fake")
+def fake_app():
+    return {}`;
+    const reimported = `from fastapi import FastAPI
+from fake_framework import FastAPI
+app = FastAPI()
+@app.get("/fake")
+def fake_app():
+    return {}`;
+    const reboundApp = `from fastapi import FastAPI
+app = FastAPI()
+app = fake
+@app.get("/fake")
+def fake_app():
+    return {}`;
+    const reboundModule = `import fastapi as fa
+fa = fake
+app = fa.FastAPI()
+@app.get("/fake")
+def fake_app():
+    return {}`;
+    assert.deepEqual(analyzer().analyzeDocument(reassigned, "routes.py").routes, []);
+    assert.deepEqual(analyzer().analyzeDocument(reimported, "routes.py").routes, []);
+    assert.deepEqual(analyzer().analyzeDocument(reboundApp, "routes.py").routes, []);
+    assert.deepEqual(analyzer().analyzeDocument(reboundModule, "routes.py").routes, []);
+  });
+
+  it("doesNotReadStatusSyntaxFromQuotedDecoratorArgumentsAndPreservesCommasInPaths", () => {
+    const source = `from fastapi import FastAPI
+app = FastAPI()
+@app.get("/a,b", description="status_code=201, detail")
+def item():
+    return {}`;
+    const result = analyzer().analyzeDocument(source, "routes.py");
+    assert.equal(result.routes[0]?.path, "/a,b");
+    assert.deepEqual(result.routes[0]?.statuses, [{ kind: "implicit", code: 200 }]);
+    assert.deepEqual(result.statusLiterals, []);
+  });
+
+  it("offersCompletionsOnlyToRouteHandlersWithImportedResponseAnnotations", () => {
+    const source = `from fastapi import FastAPI, Response as FastResponse
+app = FastAPI()
+def helper(response: FastResponse):
+    return rs
+@app.get("/valid")
+def valid(out: FastResponse):
+    return rs
+@app.get("/untyped")
+def untyped(response):
+    return rs
+@app.get("/foreign")
+def foreign(response: other.Response):
+    return rs`;
+    const result = analyzer().analyzeDocument(source, "routes.py");
+    assert.deepEqual(result.completionContexts.map(({ replyName }) => replyName), ["out"]);
+  });
+
+  it("requiresModuleQualifiedFastAPIResponseAnnotationsToBeImported", () => {
+    const unimported = `from fastapi import FastAPI
+app = FastAPI()
+@app.get("/unimported")
+def unimported(response: fastapi.Response):
+    return rs
+@app.get("/unimported-starlette")
+def unimported_starlette(response: starlette.responses.Response):
+    return rs`;
+    assert.deepEqual(analyzer().analyzeDocument(unimported, "routes.py").completionContexts, []);
+
+    const imported = `import fastapi as fa
+app = fa.FastAPI()
+@app.get("/imported")
+def imported(out: fa.Response):
+    return rs`;
+    assert.deepEqual(analyzer().analyzeDocument(imported, "routes.py").completionContexts.map(({ replyName }) => replyName), ["out"]);
+  });
+
+  it("doesNotLetNestedBranchCuesRankLaterOuterReturns", () => {
+    const source = `from fastapi import FastAPI, Response
+app = FastAPI()
+@app.get("/nested")
+def nested(response: Response):
+    if is_forbidden:
+        if other:
+            return rs
+        return rs`;
+    const result = analyzer().analyzeDocument(source, "routes.py");
+    const outerReturn = source.lastIndexOf("return rs") + "return rs".length;
+    assert.equal(result.statusSuggestions.find(({ range }) => outerReturn >= range.start && outerReturn <= range.end), undefined);
+  });
+
+  it("boundsTotalRouterModuleVisitsAcrossRepeatedRegistrations", () => {
+    const fileName = path.resolve("workspace/app.py");
+    const routerName = path.resolve("workspace/routes.py");
+    const source = `from fastapi import FastAPI\nfrom .routes import router\napp = FastAPI()\n${Array.from({ length: 200 }, () => "app.include_router(router)").join("\n")}`;
+    const routerSource = `from fastapi import APIRouter\nrouter = APIRouter()\n@router.get("/item")\ndef item(): return {}`;
+    let resolutions = 0;
+    const result = analyzer().analyzeDocument(source, fileName, () => {
+      resolutions++;
+      return { fileName: routerName, text: routerSource };
+    });
+    assert.ok(resolutions <= 63);
+    assert.ok(result.routes.length <= 63);
+  });
+
   it("findsNativeFastifyShorthandsAndRouteOptions", () => {
     const source = `import fastify from "fastify"; const app = fastify();
 app.get("/users", async (request, reply) => { reply.code(201).send({}); });

@@ -27,8 +27,15 @@ export function getCompletionCandidates(kind: CompletionKind, query: string, sug
       code: status.code,
       label: `${status.code} ${status.phrase}`,
       detail: `${status.phrase} (${status.category})${status.code === suggestion?.code ? ` — ${suggestion.detail}` : ""}`,
-      insertText: context && insertText ? insertText(kind, status.code, context)
-        : `res.${kind === "status" ? "status" : "sendStatus"}(${status.code})`,
+      insertText: context?.framework === "fastapi"
+        ? context.expression
+          ? `setattr(${context.replyName}, "status_code", ${status.code}) or ${context.replyName}`
+          : `${context.replyName}.status_code = ${status.code}`
+        : context && insertText
+          ? insertText(kind, status.code, context)
+          : context?.framework === "fastify"
+        ? `${context.replyName}.code(${status.code})${kind === "sendStatus" ? ".send()" : ""}`
+          : `res.${kind === "status" ? "status" : "sendStatus"}(${status.code})`,
       suggested: status.code === suggestion?.code,
     }));
   return candidates.sort((left, right) => Number(right.suggested) - Number(left.suggested));

@@ -175,6 +175,40 @@ suite("extension host smoke", () => {
     assert.ok(refreshed?.[249]?.command?.title.includes("410 Gone"), "editing an imported Fastify plugin should refresh its registering app");
   });
 
+  test("analyzesFastAPIRoutersAndUsesTheAnnotatedResponseParameter", async () => {
+    const workspaceRoot = path.resolve(__dirname, "../../../test/fixtures/workspace/fastapi");
+    const appUri = vscode.Uri.file(path.join(workspaceRoot, "app.py"));
+    const routerUri = vscode.Uri.file(path.join(workspaceRoot, "routers/items.py"));
+    const appDocument = await vscode.workspace.openTextDocument(appUri);
+    const routerDocument = await vscode.workspace.openTextDocument(routerUri);
+    await vscode.window.showTextDocument(appDocument);
+    const extension = vscode.extensions.getExtension("local.http-status-lens");
+    assert.ok(extension);
+    await extension.activate();
+
+    const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", appUri);
+    assert.equal(lenses?.length, 1);
+    assert.equal(lenses?.[0]?.command?.title, "GET /api/v1/items/{item_id} → 200 OK");
+
+    const text = routerDocument.getText();
+    const shortcutPosition = routerDocument.positionAt(text.indexOf("rs") + 2);
+    const completions = await vscode.commands.executeCommand<vscode.CompletionList>("vscode.executeCompletionItemProvider", routerUri, shortcutPosition);
+    const status = completions?.items.find((item) => item.filterText === "rs404");
+    assert.equal(status?.detail?.includes("Suggested from a missing lookup result"), true);
+    assert.equal(status?.insertText?.toString(), 'setattr(response, "status_code", 404) or response');
+    const rssPosition = routerDocument.positionAt(text.indexOf("rss") + 3);
+    const sendCompletions = await vscode.commands.executeCommand<vscode.CompletionList>("vscode.executeCompletionItemProvider", routerUri, rssPosition);
+    assert.equal(sendCompletions?.items.find((item) => item.filterText === "rss404")?.insertText?.toString(), 'setattr(response, "status_code", 404) or response');
+    assert.ok(completions?.items.some((item) => item.filterText === "rs200"), "other registered statuses remain available");
+
+    const multilineUri = vscode.Uri.file(path.join(workspaceRoot, "multiline.py"));
+    const multilineDocument = await vscode.workspace.openTextDocument(multilineUri);
+    const multilineText = multilineDocument.getText();
+    const multilinePosition = multilineDocument.positionAt(multilineText.indexOf("rs") + 2);
+    const multilineCompletions = await vscode.commands.executeCommand<vscode.CompletionList>("vscode.executeCompletionItemProvider", multilineUri, multilinePosition);
+    assert.equal(multilineCompletions?.items.find((item) => item.filterText === "rs200")?.insertText?.toString(), 'setattr(response, "status_code", 200) or response');
+  });
+
   test("resolves imported handlers and refreshes routes when a controller changes", async () => {
     const workspaceRoot = path.resolve(__dirname, "../../../test/fixtures/workspace/separated");
     const routeUri = vscode.Uri.file(path.join(workspaceRoot, "routes.js"));

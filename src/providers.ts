@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { documentAnalyzer } from "./analyzer.js";
 import { getCompletionCandidates, matchCompletionPrefix } from "./completions.js";
 import type { AnalysisResult, DocumentAnalyzer, ModuleResolver } from "./model.js";
+import { isPythonReturnExpression } from "./python/parser.js";
 import { formatRouteTitle, formatStatusHover } from "./presentation.js";
 import { getStatus } from "./statuses.js";
 
@@ -108,11 +109,21 @@ function createModuleResolver(document: vscode.TextDocument): ModuleResolver | u
       return undefined;
     }
     if (!specifier.startsWith(".")) return undefined;
-    const resolved = ts.resolveModuleName(specifier, containingFile, compilerOptions, ts.sys).resolvedModule;
-    if (!resolved) return undefined;
-    let fileName: string;
+    let fileName: string | undefined;
+    if (/\.pyi?$/i.test(containingFile)) {
+      const parentCount = specifier.match(/^\.+/)?.[0].length ?? 1;
+      const modulePath = specifier.slice(parentCount).replace(/\./g, path.sep);
+      const base = path.resolve(path.dirname(containingFile), ...Array(Math.max(0, parentCount - 1)).fill(".."), modulePath);
+      fileName = [`${base}.py`, path.join(base, "__init__.py")].find((candidate) => {
+        try { return statSync(candidate).isFile(); } catch { return false; }
+      });
+    } else {
+      const resolved = ts.resolveModuleName(specifier, containingFile, compilerOptions, ts.sys).resolvedModule;
+      fileName = resolved?.resolvedFileName;
+    }
+    if (!fileName) return undefined;
     try {
-      fileName = realpathSync(path.resolve(resolved.resolvedFileName));
+      fileName = realpathSync(fileName);
     } catch {
       return undefined;
     }
@@ -129,7 +140,7 @@ function createModuleResolver(document: vscode.TextDocument): ModuleResolver | u
 }
 
 function supported(document: vscode.TextDocument): boolean {
-  return document.uri.scheme === "file" && ["javascript", "typescript", "php"].includes(document.languageId);
+  return document.uri.scheme === "file" && (["javascript", "typescript", "php"].includes(document.languageId) || /\.pyi?$/i.test(document.fileName));
 }
 
 type RefreshableCodeLensProvider = vscode.CodeLensProvider & {
@@ -241,18 +252,21 @@ export function createCompletionProvider(cache: DocumentAnalysisCache, onError: 
         const analysis = cache.get(document);
         const suggestion = analysis.statusSuggestions.find(({ range }) => offset >= range.start && offset <= range.end);
         const completionContext = analysis.completionContexts.find(({ range }) => offset >= range.start && offset <= range.end);
+        const baseContext = completionContext?.framework === "fastapi"
+          ? { ...completionContext, expression: /^\s*(?:return|yield)\s+(?:\([^)]*)?(?:rss|rs)\d*$/.test(line) || isPythonReturnExpression(document.getText().slice(completionContext.range.start, offset)) }
+          : completionContext;
         const range = new vscode.Range(position.line, match.start, position.line, position.character);
         const completionStart = document.offsetAt(new vscode.Position(position.line, match.start));
         const contextPrefix = completionContext ? document.getText().slice(completionContext.range.start, completionStart) : "";
-        const completionPosition = completionContext ? documentAnalyzer.completionPosition?.(contextPrefix, completionContext) : undefined;
-        const insertionContext = completionContext?.language === "php"
+        const completionPosition = completionContext?.language === "php" ? documentAnalyzer.completionPosition?.(contextPrefix, completionContext) : undefined;
+        const enrichedContext = completionContext?.language === "php"
           ? {
             ...completionContext,
             returning: completionPosition?.returning ?? false,
             statementPosition: completionPosition?.statementPosition ?? false,
           }
-          : completionContext;
-        return getCompletionCandidates(match.kind, match.query, suggestion, insertionContext, documentAnalyzer.insertCompletion).map((candidate) => {
+          : baseContext;
+        return getCompletionCandidates(match.kind, match.query, suggestion, enrichedContext, documentAnalyzer.insertCompletion).map((candidate) => {
           const item = new vscode.CompletionItem(candidate.label, vscode.CompletionItemKind.Snippet);
           item.detail = candidate.detail;
           item.insertText = candidate.insertText;
