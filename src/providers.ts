@@ -69,7 +69,45 @@ function createModuleResolver(document: vscode.TextDocument): ModuleResolver | u
     module: ts.ModuleKind.NodeNext,
     moduleResolution: ts.ModuleResolutionKind.NodeNext,
   };
+  let phpClassPaths: readonly (readonly [string, readonly string[]])[] = [];
+  try {
+    const composer = JSON.parse(readFileSync(path.join(workspaceRoot, "composer.json"), "utf8")) as {
+      autoload?: { "psr-4"?: Record<string, string | string[]> };
+    };
+    phpClassPaths = Object.entries(composer.autoload?.["psr-4"] ?? {})
+      .map(([prefix, folder]) => [prefix.replace(/^\\/, ""), (Array.isArray(folder) ? folder : [folder]).map((item) => path.resolve(workspaceRoot, item))] as const)
+      .sort(([left], [right]) => right.length - left.length);
+  } catch { /* Composer is optional; unresolved controller classes stay unresolved. */ }
   return (specifier, containingFile) => {
+    if (path.extname(containingFile).toLowerCase() === ".php") {
+      if (specifier.startsWith(".")) {
+        const candidate = path.resolve(path.dirname(containingFile), specifier);
+        for (const fileName of [candidate, `${candidate}.php`]) {
+          try {
+            const resolved = realpathSync(fileName);
+            const relative = path.relative(workspaceRoot, resolved);
+            if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined;
+            return { fileName: resolved, text: readFileSync(resolved, "utf8") };
+          } catch { /* Try the next supported PHP path. */ }
+        }
+        return undefined;
+      }
+      const className = specifier.replace(/^\\/, "");
+      for (const [prefix, folders] of phpClassPaths) {
+        if (!className.startsWith(prefix)) continue;
+        const suffix = className.slice(prefix.length).replace(/^\\/, "").replaceAll("\\", path.sep);
+        if (!suffix || suffix.includes("..")) return undefined;
+        for (const folder of folders) {
+          try {
+            const resolved = realpathSync(path.resolve(folder, `${suffix}.php`));
+            const relative = path.relative(workspaceRoot, resolved);
+            if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined;
+            return { fileName: resolved, text: readFileSync(resolved, "utf8") };
+          } catch { /* Continue through configured PSR-4 roots. */ }
+        }
+      }
+      return undefined;
+    }
     if (!specifier.startsWith(".")) return undefined;
     let fileName: string | undefined;
     if (/\.pyi?$/i.test(containingFile)) {
@@ -102,7 +140,7 @@ function createModuleResolver(document: vscode.TextDocument): ModuleResolver | u
 }
 
 function supported(document: vscode.TextDocument): boolean {
-  return document.uri.scheme === "file" && (["javascript", "typescript"].includes(document.languageId) || /\.pyi?$/i.test(document.fileName));
+  return document.uri.scheme === "file" && (["javascript", "typescript", "php"].includes(document.languageId) || /\.pyi?$/i.test(document.fileName));
 }
 
 type RefreshableCodeLensProvider = vscode.CodeLensProvider & {
@@ -214,11 +252,21 @@ export function createCompletionProvider(cache: DocumentAnalysisCache, onError: 
         const analysis = cache.get(document);
         const suggestion = analysis.statusSuggestions.find(({ range }) => offset >= range.start && offset <= range.end);
         const completionContext = analysis.completionContexts.find(({ range }) => offset >= range.start && offset <= range.end);
-        const insertionContext = completionContext?.framework === "fastapi"
+        const baseContext = completionContext?.framework === "fastapi"
           ? { ...completionContext, expression: /^\s*(?:return|yield)\s+(?:\([^)]*)?(?:rss|rs)\d*$/.test(line) || isPythonReturnExpression(document.getText().slice(completionContext.range.start, offset)) }
           : completionContext;
         const range = new vscode.Range(position.line, match.start, position.line, position.character);
-        return getCompletionCandidates(match.kind, match.query, suggestion, insertionContext).map((candidate) => {
+        const completionStart = document.offsetAt(new vscode.Position(position.line, match.start));
+        const contextPrefix = completionContext ? document.getText().slice(completionContext.range.start, completionStart) : "";
+        const completionPosition = completionContext?.language === "php" ? documentAnalyzer.completionPosition?.(contextPrefix, completionContext) : undefined;
+        const enrichedContext = completionContext?.language === "php"
+          ? {
+            ...completionContext,
+            returning: completionPosition?.returning ?? false,
+            statementPosition: completionPosition?.statementPosition ?? false,
+          }
+          : baseContext;
+        return getCompletionCandidates(match.kind, match.query, suggestion, enrichedContext, documentAnalyzer.insertCompletion).map((candidate) => {
           const item = new vscode.CompletionItem(candidate.label, vscode.CompletionItemKind.Snippet);
           item.detail = candidate.detail;
           item.insertText = candidate.insertText;

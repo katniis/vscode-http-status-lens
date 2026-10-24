@@ -20,6 +20,7 @@ const fixtures = [
   { name: "fastify-large-plugin-graph", file: "test/fixtures/workspace/fastify/large-app.ts", framework: "fastify", replyName: "reply" },
   { name: "fastapi-small-router-graph", file: "test/fixtures/workspace/fastapi/app.py", framework: "fastapi", replyName: "response" },
   { name: "fastapi-large-app", file: "test/fixtures/workspace/fastapi/large_app.py", framework: "fastapi", replyName: "response" },
+  { name: "laravel-large-routes", file: "test/fixtures/workspace/laravel/large-routes.php", framework: "laravel", replyName: "" },
 ];
 
 // Each fixture gets a fresh child process, making cold memory and first-analysis data comparable.
@@ -28,6 +29,7 @@ for (const fixture of fixtures) {
   const runner = `
     const beforeImport = process.memoryUsage();
     const importStarted = performance.now();
+    const documentAnalyzer = require(${JSON.stringify(path.join(root, "out", "src", "analyzer.js"))}).documentAnalyzer;
     const analyzeDocument = require(${JSON.stringify(path.join(root, "out", "src", "analyzer.js"))}).analyzeDocument;
     const getCompletionCandidates = require(${JSON.stringify(path.join(root, "out", "src", "completions.js"))}).getCompletionCandidates;
     const moduleLoadMs = performance.now() - importStarted;
@@ -60,9 +62,11 @@ for (const fixture of fixtures) {
     const warm = [];
     for (let i = 0; i < 11; i++) { const t = performance.now(); latest = analyzeDocument(text, fileName, resolver); warm.push(performance.now() - t); }
     const suggestion = latest.statusSuggestions.find(({code}) => code === 404);
-    const completionContext = { replyName: ${JSON.stringify(fixture.replyName)}, framework: ${JSON.stringify(fixture.framework)} };
+    const completionContext = ${JSON.stringify(fixture.framework)} === "laravel"
+      ? latest.completionContexts.find(({range}) => range.start <= text.indexOf("return rs") && range.end >= text.indexOf("return rs"))
+      : { replyName: ${JSON.stringify(fixture.replyName)}, framework: ${JSON.stringify(fixture.framework)} };
     const status = [], sendStatus = [];
-    for (let i = 0; i < 11; i++) { let t = performance.now(); getCompletionCandidates("status", "", suggestion, completionContext); status.push(performance.now() - t); t = performance.now(); getCompletionCandidates("sendStatus", "", suggestion, completionContext); sendStatus.push(performance.now() - t); }
+    for (let i = 0; i < 11; i++) { let t = performance.now(); getCompletionCandidates("status", "", suggestion, completionContext, documentAnalyzer.insertCompletion); status.push(performance.now() - t); t = performance.now(); getCompletionCandidates("sendStatus", "", suggestion, completionContext, documentAnalyzer.insertCompletion); sendStatus.push(performance.now() - t); }
     const median = values => { const sorted = values.slice(1).sort((a,b) => a-b); return sorted[Math.floor(sorted.length / 2)]; };
     if (global.gc) global.gc();
     process.stdout.write(JSON.stringify({ fixtureBytes: Buffer.byteLength(text), moduleLoadMs, coldAnalysisMs, warmAnalysisMedianMs: median(warm), warmAnalysisSamplesMs: warm.slice(1), completionStatusMedianMs: median(status), completionSendStatusMedianMs: median(sendStatus), analysisCounts: { routes: latest.routes.length, statusLiterals: latest.statusLiterals.length, suggestions: latest.statusSuggestions.length }, inferred404: latest.routes.some(({statuses}) => statuses.some(({code}) => code === 404)), localSuggestion404: latest.statusSuggestions.some(({code}) => code === 404), memory: { beforeImport, afterImport, beforeAnalysis, after: process.memoryUsage() } }));

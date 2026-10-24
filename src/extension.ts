@@ -14,8 +14,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const selector: vscode.DocumentSelector = [
     { scheme: "file", language: "javascript" },
     { scheme: "file", language: "typescript" },
+    { scheme: "file", language: "php" },
     { scheme: "file", pattern: "**/*.py" },
     { scheme: "file", pattern: "**/*.pyi" },
+    { scheme: "file", language: "php" },
   ];
   context.subscriptions.push(
     output,
@@ -35,7 +37,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(({ document }) => {
-    if (document.uri.scheme !== "file" || (!["javascript", "typescript"].includes(document.languageId) && !/\.pyi?$/i.test(document.fileName))) return;
+    if (document.uri.scheme !== "file" || (!["javascript", "typescript", "php"].includes(document.languageId) && !/\.pyi?$/i.test(document.fileName))) return;
     cache.invalidate(document.uri);
     refreshScheduler.schedule(document.uri.toString(), () => {
       routeDecorations.refresh(document.uri);

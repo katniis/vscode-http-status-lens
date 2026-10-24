@@ -1,13 +1,25 @@
-import type { AnalysisResult, DocumentAnalyzer } from "./model.js";
-import { javascriptDocumentAnalyzer } from "./javascript/analyzer.js";
+import path from "node:path";
+import type { AnalysisResult, CompletionContext, CompletionKind, CompletionPosition, DocumentAnalyzer, DocumentSnapshot, ModuleResolver } from "./model.js";
+import { laravelDocumentAnalyzer } from "./analyzers/laravel.js";
+import { javascriptDocumentAnalyzer } from "./analyzers/typescript.js";
 import { pythonDocumentAnalyzer } from "./python/analyzer.js";
 
-export function analyzerForFile(fileName: string): DocumentAnalyzer {
-  return /\.pyi?$/i.test(fileName) ? pythonDocumentAnalyzer : javascriptDocumentAnalyzer;
+/** Selects one language analyzer while keeping the provider-facing result normalized. */
+export function analyzerFor(fileName: string): DocumentAnalyzer {
+  const extension = path.extname(fileName).toLowerCase();
+  if (extension === ".php") return laravelDocumentAnalyzer;
+  if (/\.pyi?$/i.test(fileName)) return pythonDocumentAnalyzer;
+  return javascriptDocumentAnalyzer;
 }
 
-export function analyzeDocument(text: string, fileName: string, resolveImport?: Parameters<DocumentAnalyzer["analyze"]>[1]): AnalysisResult {
-  return analyzerForFile(fileName).analyze({ text, fileName }, resolveImport);
+export function analyzeDocument(text: string, fileName: string, resolveImport?: ModuleResolver): AnalysisResult {
+  return analyzerFor(fileName).analyze({ text, fileName }, resolveImport);
 }
 
-export const documentAnalyzer: DocumentAnalyzer = { analyze: ({ text, fileName }, resolveImport) => analyzeDocument(text, fileName, resolveImport) };
+export const documentAnalyzer: DocumentAnalyzer = {
+  analyze: (snapshot: DocumentSnapshot, resolveImport) => analyzerFor(snapshot.fileName).analyze(snapshot, resolveImport),
+  insertCompletion: (kind: CompletionKind, code: number, context: CompletionContext) =>
+    (context.language === "php" ? laravelDocumentAnalyzer : javascriptDocumentAnalyzer).insertCompletion?.(kind, code, context) ?? "",
+  completionPosition: (prefix: string, context: CompletionContext): CompletionPosition =>
+    (context.language === "php" ? laravelDocumentAnalyzer.completionPosition!(prefix, context) : { returning: false, statementPosition: false }),
+};

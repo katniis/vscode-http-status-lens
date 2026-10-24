@@ -84,6 +84,30 @@ suite("opt-in extension host benchmark", () => {
     const fastifySorted = fastifyCompletionSamplesMs.slice(1).sort((left, right) => left - right);
     const fastifyCompletionMs = fastifySorted[Math.floor(fastifySorted.length / 2)] ?? 0;
 
+    const laravelFile = path.resolve(__dirname, "../../../test/fixtures/workspace/laravel/large-routes.php");
+    const laravelDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(laravelFile));
+    await vscode.window.showTextDocument(laravelDocument);
+    const laravelSource = laravelDocument.getText();
+    const laravelOpenMemory = memory();
+    const laravelAnalysisStart = performance.now();
+    const laravelLenses = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", laravelDocument.uri);
+    const laravelAnalysisMs = performance.now() - laravelAnalysisStart;
+    assert.equal(laravelLenses?.length, 300);
+    const afterLaravelAnalysis = memory();
+    const laravelOffset = laravelSource.indexOf("return rs") + "return rs".length;
+    const laravelPosition = laravelDocument.positionAt(laravelOffset);
+    const laravelCompletionSamplesMs: number[] = [];
+    for (let index = 0; index < 11; index++) {
+      const completionStart = performance.now();
+      const completions = await vscode.commands.executeCommand<vscode.CompletionList>(
+        "vscode.executeCompletionItemProvider", laravelDocument.uri, laravelPosition);
+      laravelCompletionSamplesMs.push(performance.now() - completionStart);
+      assert.ok(completions?.items.some(({ filterText }) => filterText === "rs404"));
+      assert.ok(completions?.items.some(({ filterText }) => filterText === "rs511"));
+    }
+    const laravelSorted = laravelCompletionSamplesMs.slice(1).sort((left, right) => left - right);
+    const laravelCompletionMs = laravelSorted[Math.floor(laravelSorted.length / 2)] ?? 0;
+
     const outputDirectory = path.resolve(__dirname, "../../../benchmark-output");
     await mkdir(outputDirectory, { recursive: true });
     await writeFile(path.join(outputDirectory, "extension-host.json"), JSON.stringify({
@@ -105,6 +129,15 @@ suite("opt-in extension host benchmark", () => {
         completionColdMs: fastifyCompletionSamplesMs[0],
         completionSamplesMs: fastifyCompletionSamplesMs.slice(1),
         snapshots: { afterOpen: fastifyOpenMemory, afterAnalysis: afterFastifyAnalysis, afterCompletions: memory() },
+      },
+      laravel: {
+        fixtureBytes: Buffer.byteLength(laravelSource),
+        routes: laravelLenses?.length ?? 0,
+        analysisMs: laravelAnalysisMs,
+        completionMs: laravelCompletionMs,
+        completionColdMs: laravelCompletionSamplesMs[0],
+        completionSamplesMs: laravelCompletionSamplesMs.slice(1),
+        snapshots: { afterOpen: laravelOpenMemory, afterAnalysis: afterLaravelAnalysis, afterCompletions: memory() },
       },
     }, null, 2));
   });
