@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=12,20,27&height=180&section=header&text=HTTP%20Status%20Lens&fontSize=42&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=See%20every%20Express%20%26%20Fastify%20response%20status%20%E2%80%94%20without%20running%20your%20app&descSize=16&descAlignY=58" alt="HTTP Status Lens" />
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=12,20,27&height=180&section=header&text=HTTP%20Status%20Lens&fontSize=42&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=See%20every%20route%20response%20status%20%E2%80%94%20without%20running%20your%20app&descSize=16&descAlignY=58" alt="HTTP Status Lens" />
 </p>
 
 <p align="center">
